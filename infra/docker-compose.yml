@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: dressme
+      POSTGRES_PASSWORD: dressme
+      POSTGRES_DB: dressme
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  backend:
+    build: ../backend
+    env_file:
+      - ../backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://dressme:dressme@postgres:5432/dressme
+      QDRANT_URL: http://qdrant:6333
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - qdrant
+
+volumes:
+  postgres_data:
+  qdrant_data:
