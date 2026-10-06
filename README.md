@@ -13,8 +13,8 @@ backend/    FastAPI service: auth, wardrobe/outfit/purchase APIs, agent orchestr
 frontend/
   mobile/   Expo / React Native app (primary client)
   web/      React web client (placeholder)
-infra/      docker-compose for Postgres + Qdrant + backend
-docs/       project brief and architecture diagram
+infra/      docker-compose for Postgres + backend (Pinecone is managed/cloud, no container)
+docs/       project brief, personas & architecture deck
 ```
 
 ## Architecture
@@ -24,15 +24,16 @@ delegates fashion intelligence to an **Agent Orchestrator** coordinating special
 agents:
 
 - **Vision Agent** — image classification & embeddings (CLIP/CNN)
-- **Wardrobe Agent** — manages the digital wardrobe
-- **Style Profile Agent** — learns user style preferences
-- **Context Agent** — resolves occasion/weather/season
+- **Metadata Agent** — manages the digital wardrobe
+- **Style Profile Agent** — learns user style preferences (LLM/RAG)
+- **Context Agent** — resolves occasion/weather/season (LLM + rules)
 - **Recommendation Agent** — generates outfit suggestions
 - **Purchase Agent** — evaluates a potential new purchase
 - **LLM Agent** (optional) — natural-language explanations
 
-Data lives in PostgreSQL (relational), Qdrant (vector similarity search), and cloud
-object storage (images).
+Data lives in PostgreSQL (relational), Pinecone (vector similarity search), and cloud
+object storage (images). See `docs/Copie de user persona architecture (1).pdf` for the
+full personas, objectives, and architecture reference this scaffold follows.
 
 ## Getting started
 

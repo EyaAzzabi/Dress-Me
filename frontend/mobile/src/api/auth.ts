@@ -21,3 +21,14 @@ export function login(payload: LoginPayload) {
 export function register(payload: RegisterPayload) {
   return apiClient.post("/auth/register", payload).then((r) => r.data);
 }
+
+export interface Me {
+  id: string;
+  email: string;
+  full_name: string | null;
+  avatar_photo_url: string | null;
+}
+
+export function getMe() {
+  return apiClient.get<Me>("/auth/me").then((r) => r.data);
+}

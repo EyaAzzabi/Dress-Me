@@ -15,6 +15,22 @@ dist/
 .expo/
 .expo-shared/
 
+# ML data — raw source data and large intermediate artifacts (embeddings, trained
+# model copies, generated catalogs) are all regenerable from ml/src + ml/notebooks.
+# The small artifacts actually needed at runtime are committed separately under
+# backend/app/ml/artifacts and backend/app/data.
+ml/data/raw/
+ml/data/processed/
+.ipynb_checkpoints/
+
+# Pre-downloaded wheels (large binaries, fetched on demand — see backend/Dockerfile).
+# .gitkeep kept so the folder always exists for Docker's COPY, even with no wheel in it.
+backend/wheels/*
+!backend/wheels/.gitkeep
+
+# Local dev-only wardrobe photo uploads (see LOCAL_STORAGE_DIR in backend/.env.example).
+backend/uploads/
+
 # OS
 .DS_Store
 Thumbs.db

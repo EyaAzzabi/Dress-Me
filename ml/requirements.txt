@@ -1,0 +1,7 @@
+pandas>=2.2
+numpy>=1.26
+matplotlib>=3.9
+pillow>=10.4
+kaggle>=1.6
+playwright>=1.45
+beautifulsoup4>=4.12

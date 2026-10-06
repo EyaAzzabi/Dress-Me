@@ -20,7 +20,7 @@ class ClothingItem(Base):
     style: Mapped[str | None] = mapped_column(String(100))  # casual, formal, sport, ...
     season: Mapped[str | None] = mapped_column(String(50))
     pattern: Mapped[str | None] = mapped_column(String(100))
-    embedding_id: Mapped[str | None] = mapped_column(String(64))  # id in the Qdrant vector store
+    embedding_id: Mapped[str | None] = mapped_column(String(64))  # id in the Pinecone vector store
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

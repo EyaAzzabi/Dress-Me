@@ -7,10 +7,10 @@ from app.agents.base import BaseAgent
 from app.models.clothing_item import ClothingItem
 
 
-class WardrobeAgent(BaseAgent):
+class MetadataAgent(BaseAgent):
     """Manages the digital wardrobe: add/remove items, organize, search, usage history."""
 
-    name = "wardrobe_agent"
+    name = "metadata_agent"
 
     def __init__(self, db: Session):
         self.db = db

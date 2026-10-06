@@ -3,11 +3,37 @@ uvicorn[standard]>=0.30
 sqlalchemy>=2.0
 psycopg[binary]>=3.2
 pydantic>=2.8
+email-validator>=2.0
 pydantic-settings>=2.4
 python-jose[cryptography]>=3.3
 passlib[bcrypt]>=1.7
+# passlib (last released ~2020) is incompatible with bcrypt 5.x — its internal
+# self-test ("detect_wrap_bug") hits bcrypt 5's stricter 72-byte input validation
+# and raises ValueError during backend init, not during actual password handling
+# (reproduced in a real container build: pip resolved bcrypt 5.0.0 with no pin
+# here and every /auth/register call 500'd). bcrypt 4.3.0 is confirmed working
+# (this project's own dev environment already has it); pin below 5 rather than
+# wait for an unmaintained passlib release.
+bcrypt<5
 python-multipart>=0.0.9
 httpx>=0.27
-qdrant-client>=1.10
+pinecone>=5.0
 alembic>=1.13
 pytest>=8.3
+
+# Vision Agent: FashionCLIP embeddings + the trained category classifier
+# (app/ml/artifacts/category_classifier.joblib — see ml/notebooks/08_category_classifier.py)
+torch>=2.7
+transformers>=4.30
+scikit-learn>=1.5
+joblib>=1.5
+pillow>=10.4
+numpy>=1.26
+
+# Ecommerce Service: searches the bundled Tunisian catalog
+# (app/data/tunisian_catalog.parquet — see ml/src/catalog.py for how it's built)
+pandas>=2.2
+pyarrow>=16.0
+
+# Storage Service: S3-compatible wardrobe photo uploads
+boto3>=1.34

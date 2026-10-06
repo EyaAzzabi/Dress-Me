@@ -18,6 +18,7 @@ class UserRead(BaseModel):
     id: uuid.UUID
     email: EmailStr
     full_name: str | None = None
+    avatar_photo_url: str | None = None
 
     class Config:
         from_attributes = True
