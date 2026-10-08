@@ -82,7 +82,7 @@ def add_item(
 
 @router.delete("/{item_id}", status_code=204)
 def remove_item(
-    item_id: str,
+    item_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:

@@ -13,8 +13,9 @@ import {
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { Pill } from "@/components/Pill";
-import { ScreenTitle, SectionLabel } from "@/components/Typography";
+import { SectionLabel } from "@/components/Typography";
 import { TextField } from "@/components/TextField";
+import { TunisianPhotoHero } from "@/components/TunisianPhotoHero";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius, spacing } from "@/theme/tokens";
 
@@ -83,7 +84,12 @@ export default function PackingScreen() {
 
   return (
     <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.container}>
-      <ScreenTitle>La valise</ScreenTitle>
+      <TunisianPhotoHero
+        icon="✧"
+        title="Prête pour le voyage"
+        subtitle="Emporte tes essentiels, de Sidi Bou aux vacances"
+        image="wardrobe"
+      />
 
       <Card style={styles.formCard}>
         <TextField placeholder="Destination" value={destination} onChangeText={setDestination} />

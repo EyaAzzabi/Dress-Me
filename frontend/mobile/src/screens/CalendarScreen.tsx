@@ -6,7 +6,7 @@ import { listPlannedOutfits, planOutfit, ScheduledOutfit, unplanOutfit } from "@
 import { listWardrobeItems } from "@/api/wardrobe";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
-import { ScreenTitle } from "@/components/Typography";
+import { TunisianPhotoHero } from "@/components/TunisianPhotoHero";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius, spacing } from "@/theme/tokens";
 import { ClothingItem } from "@/types/models";
@@ -122,7 +122,12 @@ export default function CalendarScreen() {
 
   return (
     <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.container}>
-      <ScreenTitle>Calendar</ScreenTitle>
+      <TunisianPhotoHero
+        icon="✧"
+        title="Mon calendrier"
+        subtitle="Planifie tes looks pour chaque belle journée"
+        image="style"
+      />
 
       <View style={styles.monthNav}>
         <Pressable onPress={() => changeMonth(-1)}>

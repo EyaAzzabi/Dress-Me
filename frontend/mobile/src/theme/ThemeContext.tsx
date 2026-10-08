@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { useColorScheme } from "react-native";
 
+import { getActiveSeason, SeasonalOverride } from "@/theme/seasons";
 import { ColorTokens, darkColors, lightColors } from "@/theme/tokens";
 
 const THEME_OVERRIDE_KEY = "dressme_theme_override";
@@ -10,9 +11,30 @@ interface ThemeContextValue {
   colors: ColorTokens;
   isDark: boolean;
   toggleTheme: () => void;
+  season: SeasonalOverride;
 }
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
+
+/** Merges seasonal primary/accent/bg values into the base color token set. */
+function applySeasonalOverride(base: ColorTokens, s: SeasonalOverride): ColorTokens {
+  return {
+    ...base,
+    primary:        s.primary,
+    primaryLight:   s.primary + "CC",
+    primaryDark:    s.primary,
+    primaryContrast: s.primaryContrast,
+    accent:         s.accent,
+    bg:             s.bg,
+    surface:        s.surface,
+    pillActiveBg:   s.pillActiveBg,
+    pillActiveText: s.pillActiveText,
+    tabActive:      s.tabActive,
+    gradientStart:  s.gradientStart,
+    gradientMid:    s.gradientStart,
+    gradientEnd:    s.gradientEnd,
+  };
+}
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const systemScheme = useColorScheme();
@@ -25,6 +47,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const isDark = override ? override === "dark" : systemScheme === "dark";
+  const season = useMemo(() => getActiveSeason(new Date()), []);
 
   function toggleTheme() {
     const next = isDark ? "light" : "dark";
@@ -35,9 +58,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     });
   }
 
+  const baseColors = isDark ? darkColors : lightColors;
+  const colors = useMemo(() => applySeasonalOverride(baseColors, season), [baseColors, season]);
+
   const value = useMemo(
-    () => ({ colors: isDark ? darkColors : lightColors, isDark, toggleTheme }),
-    [isDark]
+    () => ({ colors, isDark, toggleTheme, season }),
+    [colors, isDark, season]
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

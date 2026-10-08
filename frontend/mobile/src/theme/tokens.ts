@@ -1,8 +1,13 @@
-// Design tokens ported 1:1 from the approved HTML prototype (dressme_preview.html)
-// so the app matches it exactly, not just "in spirit".
+// ─────────────────────────────────────────────────────────────
+//  DressMe Design Tokens — Thème Tunisien Rose Premium
+//  Palette inspirée des médinas tunisiennes :
+//  rose fard (#F8A4C8) · blanc chéchaouen (#FFF8FA)
+//  navy profond (#1A237E) · or arabesque (#C9984A)
+// ─────────────────────────────────────────────────────────────
 
 export interface ColorTokens {
   bg: string;
+  bgAlt: string;
   surface: string;
   surfaceElevated: string;
   border: string;
@@ -11,8 +16,11 @@ export interface ColorTokens {
   textMuted: string;
   textSubtle: string;
   primary: string;
+  primaryLight: string;
+  primaryDark: string;
   primaryContrast: string;
-  accent: string;
+  accent: string;           // or tunisien
+  accentSoft: string;
   pillBg: string;
   pillActiveBg: string;
   pillText: string;
@@ -23,73 +31,169 @@ export interface ColorTokens {
   tabInactive: string;
   inputBg: string;
   inputBorder: string;
+  inputFocusBorder: string;
   success: string;
   successBg: string;
   warning: string;
   warningBg: string;
   error: string;
   errorBg: string;
+  gradientStart: string;
+  gradientMid: string;
+  gradientEnd: string;
+  // Tunisian specific
+  tunisianGold: string;
+  tunisianNavy: string;
 }
 
 export const lightColors: ColorTokens = {
-  bg: "#FFFFFF",
-  surface: "#FAFAFA",
+  // Fonds
+  bg:              "#FFF8FA",
+  bgAlt:           "#FFF0F5",
+  surface:         "#FFE8F3",
   surfaceElevated: "#FFFFFF",
-  border: "#E5E5EA",
-  borderStrong: "#D1D1D6",
-  text: "#0A0A0A",
-  textMuted: "rgba(0,0,0,0.5)",
-  textSubtle: "rgba(0,0,0,0.35)",
-  primary: "#000000",
+
+  // Bordures
+  border:          "#F5C2D8",
+  borderStrong:    "#EC93BB",
+
+  // Textes
+  text:            "#1A0A14",
+  textMuted:       "rgba(80,10,40,0.55)",
+  textSubtle:      "rgba(80,10,40,0.35)",
+
+  // Rose primaire (plus chaud, plus élégant)
+  primary:         "#E8176A",
+  primaryLight:    "#FF6BA8",
+  primaryDark:     "#B50050",
   primaryContrast: "#FFFFFF",
-  accent: "#D4A373",
-  pillBg: "#F2F2F7",
-  pillActiveBg: "#000000",
-  pillText: "#636366",
-  pillActiveText: "#FFFFFF",
-  tabBg: "#FFFFFF",
-  tabBorder: "#E5E5EA",
-  tabActive: "#000000",
-  tabInactive: "#8E8E93",
-  inputBg: "#F2F2F7",
-  inputBorder: "#E5E5EA",
-  success: "#2E7D32",
-  successBg: "#E8F5E9",
-  warning: "#E65100",
-  warningBg: "#FFF3E0",
-  error: "#C62828",
-  errorBg: "#FFEBEE",
+
+  // Or tunisien comme accent
+  accent:          "#C9984A",
+  accentSoft:      "#F5DEB8",
+
+  // Pills
+  pillBg:          "#FFD6EC",
+  pillActiveBg:    "#E8176A",
+  pillText:        "#A01050",
+  pillActiveText:  "#FFFFFF",
+
+  // Tab bar
+  tabBg:           "#FFFFFF",
+  tabBorder:       "#F5C2D8",
+  tabActive:       "#E8176A",
+  tabInactive:     "#C0839E",
+
+  // Inputs
+  inputBg:         "#FFF0F7",
+  inputBorder:     "#F5C2D8",
+  inputFocusBorder:"#E8176A",
+
+  // États
+  success:         "#2E7D32",
+  successBg:       "#F0FBF0",
+  warning:         "#E65100",
+  warningBg:       "#FFF8F0",
+  error:           "#C62828",
+  errorBg:         "#FFF0F0",
+
+  // Dégradés
+  gradientStart:   "#FFADD5",
+  gradientMid:     "#FF78B8",
+  gradientEnd:     "#E8176A",
+
+  // Spécifique Tunisie
+  tunisianGold:    "#C9984A",
+  tunisianNavy:    "#1A237E",
 };
 
 export const darkColors: ColorTokens = {
-  bg: "#0A0A0A",
-  surface: "#1C1C1E",
-  surfaceElevated: "#2C2C2E",
-  border: "rgba(255,255,255,0.1)",
-  borderStrong: "rgba(255,255,255,0.2)",
-  text: "#F5F5F7",
-  textMuted: "rgba(255,255,255,0.5)",
-  textSubtle: "rgba(255,255,255,0.3)",
-  primary: "#FFFFFF",
-  primaryContrast: "#000000",
-  accent: "#D4A373",
-  pillBg: "#2C2C2E",
-  pillActiveBg: "#FFFFFF",
-  pillText: "#AEAEB2",
-  pillActiveText: "#000000",
-  tabBg: "#141416",
-  tabBorder: "rgba(255,255,255,0.08)",
-  tabActive: "#FFFFFF",
-  tabInactive: "#636366",
-  inputBg: "#1C1C1E",
-  inputBorder: "rgba(255,255,255,0.12)",
-  success: "#81C784",
-  successBg: "#0D2818",
-  warning: "#FFB74D",
-  warningBg: "#2E1B00",
-  error: "#EF9A9A",
-  errorBg: "#2E0A0A",
+  bg:              "#150010",
+  bgAlt:           "#1E001A",
+  surface:         "#2A0020",
+  surfaceElevated: "#380028",
+
+  border:          "rgba(232,23,106,0.20)",
+  borderStrong:    "rgba(232,23,106,0.40)",
+
+  text:            "#FFE8F4",
+  textMuted:       "rgba(255,180,220,0.58)",
+  textSubtle:      "rgba(255,180,220,0.35)",
+
+  primary:         "#FF4DA6",
+  primaryLight:    "#FF80C4",
+  primaryDark:     "#CC0077",
+  primaryContrast: "#FFFFFF",
+
+  accent:          "#E0AA5A",
+  accentSoft:      "#4A3010",
+
+  pillBg:          "#380028",
+  pillActiveBg:    "#FF4DA6",
+  pillText:        "#FF9FD0",
+  pillActiveText:  "#FFFFFF",
+
+  tabBg:           "#150010",
+  tabBorder:       "rgba(232,23,106,0.15)",
+  tabActive:       "#FF4DA6",
+  tabInactive:     "#8A4068",
+
+  inputBg:         "#2A0020",
+  inputBorder:     "rgba(232,23,106,0.25)",
+  inputFocusBorder:"#FF4DA6",
+
+  success:         "#81C784",
+  successBg:       "#0A2010",
+  warning:         "#FFB74D",
+  warningBg:       "#2A1500",
+  error:           "#EF9A9A",
+  errorBg:         "#2A0808",
+
+  gradientStart:   "#6B0040",
+  gradientMid:     "#A00060",
+  gradientEnd:     "#FF4DA6",
+
+  tunisianGold:    "#E0AA5A",
+  tunisianNavy:    "#3949AB",
 };
 
-export const radius = { sm: 10, md: 16, lg: 24, pill: 9999 };
-export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24 };
+export const radius = {
+  xs:   6,
+  sm:   12,
+  md:   18,
+  lg:   26,
+  xl:   34,
+  pill: 9999,
+};
+
+export const spacing = {
+  xs:   4,
+  sm:   8,
+  md:   14,
+  lg:   18,
+  xl:   22,
+  xxl:  28,
+  xxxl: 36,
+};
+
+// Ombres réutilisables
+export const shadow = {
+  sm: {
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  md: {
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  lg: {
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+};

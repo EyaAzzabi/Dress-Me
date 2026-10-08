@@ -10,7 +10,11 @@ export function TextField(props: TextInputProps) {
       placeholderTextColor={colors.textSubtle}
       style={[
         styles.field,
-        { backgroundColor: colors.inputBg, color: colors.text },
+        {
+          backgroundColor: colors.inputBg,
+          color: colors.text,
+          borderColor: colors.inputBorder,
+        },
       ]}
       {...props}
     />
@@ -24,5 +28,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     borderRadius: radius.md,
     fontSize: 16,
+    borderWidth: 1.5,
   },
 });

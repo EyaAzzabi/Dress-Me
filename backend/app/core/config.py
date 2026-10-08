@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     # Comma-separated. Defaults cover local dev (Vite web, Expo web/Metro) — the
     # mobile app itself authenticates via a Bearer header, not cookies, so it isn't
     # subject to browser CORS at all; this only matters for browser-based clients.
-    cors_origins: str = "http://localhost:5173,http://localhost:8081,http://localhost:19006"
+    cors_origins: str = "http://localhost:5173,http://localhost:8081,http://localhost:8082,http://localhost:19006"
 
     secret_key: str = "change-me"
     algorithm: str = "HS256"
