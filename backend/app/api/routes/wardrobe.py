@@ -73,6 +73,7 @@ def add_item(
         season=payload.season,
         pattern=attributes["pattern"],
         embedding_id=str(item_id) if vector_store.is_configured() else None,
+        embedding=attributes["embedding"].tolist(),
     )
     db.add(item)
     db.commit()

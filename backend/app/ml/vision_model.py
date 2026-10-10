@@ -47,6 +47,26 @@ PATTERN_PROMPTS = {
 }
 
 
+# Out-of-distribution guard: the category classifier's hors_perimetre class only ever
+# saw non-clothing *catalog products* (cosmetics, boxes...), so a landscape, an animal
+# or a screenshot gets forced into the nearest garment class ~12 % of the time. A
+# zero-shot "clothing vs. anything else" check on top cuts that to ~3 %, for ~2 more
+# points of real garments rejected (scripts/evaluate_clothing_gate.py).
+CLOTHING_GATE_PROMPTS = [
+    "a photo of a clothing item", "a photo of a top or shirt", "a photo of trousers or a skirt",
+    "a photo of a dress", "a photo of a jacket or coat", "a photo of shoes", "a photo of a handbag",
+    "a photo of a fashion accessory such as a belt, scarf, hat or jewelry", "a person wearing an outfit",
+]
+NON_CLOTHING_GATE_PROMPTS = [
+    "a photo of a landscape", "a photo of nature", "a photo of a city or building", "a photo of an animal",
+    "a photo of food", "a photo of a car or vehicle", "a photo of an electronic device",
+    "a photo of furniture or a room", "a screenshot or a document with text",
+    "a photo of a cosmetic or beauty product", "a photo of a household object",
+    "a close-up photo of a face", "an abstract texture or pattern",
+]
+CLOTHING_GATE_THRESHOLD = 0.3
+
+
 def _get_device() -> str:
     import torch
 
@@ -125,7 +145,25 @@ def _zero_shot(embedding: np.ndarray, prompts: dict[str, str], template: str) ->
     return list(prompts)[best]
 
 
+@lru_cache
+def _clothing_gate_text_vectors() -> np.ndarray:
+    return _embed_texts(CLOTHING_GATE_PROMPTS + NON_CLOTHING_GATE_PROMPTS)
+
+
+def clothing_probability(embeddings: np.ndarray) -> np.ndarray:
+    """Zero-shot probability mass on the clothing prompts, for one (512,) or a batch
+    (n, 512) of L2-normalized embeddings."""
+    model, _, _ = _load_fashionclip()
+    scale = float(model.logit_scale.exp().item())
+    logits = scale * np.atleast_2d(embeddings) @ _clothing_gate_text_vectors().T
+    probs = np.exp(logits - logits.max(axis=1, keepdims=True))
+    probs /= probs.sum(axis=1, keepdims=True)
+    return probs[:, :len(CLOTHING_GATE_PROMPTS)].sum(axis=1)
+
+
 def predict_category(embedding: np.ndarray) -> str:
+    if clothing_probability(embedding)[0] < CLOTHING_GATE_THRESHOLD:
+        return "hors_perimetre"
     clf = _load_category_classifier()
     return clf.predict(embedding.reshape(1, -1))[0]
 

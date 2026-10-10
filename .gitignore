@@ -31,6 +31,14 @@ backend/wheels/*
 # Local dev-only wardrobe photo uploads (see LOCAL_STORAGE_DIR in backend/.env.example).
 backend/uploads/
 
+# Image download cache of backend/scripts/build_catalog_index.py.
+backend/scripts/.catalog_images/
+backend/scripts/.ood_picsum.npy
+backend/scripts/.extract_preview/
+
+# Local Postgres data dir when running without Docker.
+backend/.pgdata/
+
 # OS
 .DS_Store
 Thumbs.db

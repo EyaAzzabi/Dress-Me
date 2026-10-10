@@ -214,18 +214,13 @@ def test_recommendations_build_a_real_outfit(client, auth_headers, haut_and_bas_
     body = response.json()
     assert isinstance(body["outfits"], list)
 
-    if vector_store.is_configured():
-        # A haut + a bas is exactly one valid base, and both items just got a real
-        # stored embedding (Pinecone is live in this environment) — a real outfit
-        # should come back, not just an empty, gracefully-degraded list.
-        assert len(body["outfits"]) == 1
-        outfit = body["outfits"][0]
-        assert set(outfit["item_ids"]) == {item1["id"], item2["id"]}
-        assert outfit["relevance_score"] is not None
-    else:
-        # No Pinecone configured in this environment — confirms the no-embeddings
-        # path degrades to an empty (not broken) result rather than erroring.
-        assert body["outfits"] == []
+    # A haut + a bas is exactly one valid base, and both items just got a real stored
+    # embedding (in Pinecone if configured, otherwise in clothing_items.embedding) — a
+    # real outfit should come back, not just an empty, gracefully-degraded list.
+    assert len(body["outfits"]) == 1
+    outfit = body["outfits"][0]
+    assert set(outfit["item_ids"]) == {item1["id"], item2["id"]}
+    assert outfit["relevance_score"] is not None
 
     listed = client.get("/api/v1/recommendations/outfits", headers=auth_headers)
     assert listed.status_code == 200

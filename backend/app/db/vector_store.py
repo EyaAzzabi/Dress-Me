@@ -72,7 +72,8 @@ def delete_item_embedding(item_id) -> None:
 
 def find_similar_items(embedding, *, owner_id, top_k: int = 10, exclude_item_id=None) -> list[dict]:
     if not is_configured():
-        return []
+        return _find_similar_items_locally(embedding, owner_id=owner_id, top_k=top_k,
+                                           exclude_item_id=exclude_item_id)
 
     vector = embedding.tolist() if hasattr(embedding, "tolist") else list(embedding)
     response = get_clothing_index().query(
@@ -91,8 +92,52 @@ def find_similar_items(embedding, *, owner_id, top_k: int = 10, exclude_item_id=
 
 
 def fetch_embeddings(item_ids: list) -> dict[str, list[float]]:
-    if not is_configured() or not item_ids:
+    if not item_ids:
         return {}
+    if not is_configured():
+        return _fetch_embeddings_locally(item_ids)
 
     response = get_clothing_index().fetch(ids=[str(i) for i in item_ids])
     return {item_id: vector.values for item_id, vector in response.vectors.items()}
+
+
+# Without Pinecone, embeddings are read from clothing_items.embedding instead — a
+# per-user brute-force cosine search is fine at wardrobe scale (hundreds of items).
+
+def _fetch_embeddings_locally(item_ids: list) -> dict[str, list[float]]:
+    from app.db.session import SessionLocal
+    from app.models.clothing_item import ClothingItem
+
+    with SessionLocal() as db:
+        rows = (
+            db.query(ClothingItem.id, ClothingItem.embedding)
+            .filter(ClothingItem.id.in_(item_ids), ClothingItem.embedding.is_not(None))
+            .all()
+        )
+    return {str(item_id): embedding for item_id, embedding in rows}
+
+
+def _find_similar_items_locally(embedding, *, owner_id, top_k: int, exclude_item_id=None) -> list[dict]:
+    import numpy as np
+
+    from app.db.session import SessionLocal
+    from app.models.clothing_item import ClothingItem
+
+    with SessionLocal() as db:
+        rows = (
+            db.query(ClothingItem.id, ClothingItem.category, ClothingItem.embedding)
+            .filter(ClothingItem.owner_id == owner_id, ClothingItem.embedding.is_not(None))
+            .all()
+        )
+    rows = [r for r in rows if exclude_item_id is None or str(r.id) != str(exclude_item_id)]
+    if not rows:
+        return []
+
+    # Stored embeddings are already L2-normalized (vision_model._normalize), so the
+    # dot product is the cosine similarity — same metric as the Pinecone index.
+    scores = np.array([r.embedding for r in rows]) @ np.asarray(embedding, dtype=float)
+    order = np.argsort(-scores)[:top_k]
+    return [
+        {"item_id": str(rows[i].id), "score": float(scores[i]), "category": rows[i].category}
+        for i in order
+    ]

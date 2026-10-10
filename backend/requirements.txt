@@ -25,10 +25,15 @@ pytest>=8.3
 # (app/ml/artifacts/category_classifier.joblib — see ml/notebooks/08_category_classifier.py)
 torch>=2.7
 transformers>=4.30
-scikit-learn>=1.5
+# Both .joblib artifacts were pickled with scikit-learn 1.5.0 — unpickling them with
+# another minor version isn't supported (InconsistentVersionWarning / wrong results).
+scikit-learn>=1.5,<1.6
 joblib>=1.5
 pillow>=10.4
 numpy>=1.26
+# Garment extraction (app/ml/garment_segmentation.py): connected components of the
+# SegFormer clothes masks
+scipy>=1.11
 
 # Ecommerce Service: searches the bundled Tunisian catalog
 # (app/data/tunisian_catalog.parquet — see ml/src/catalog.py for how it's built)

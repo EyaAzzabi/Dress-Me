@@ -4,11 +4,13 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.agents.context_agent import ContextAgent
+from app.agents.extraction_agent import ExtractionAgent
 from app.agents.metadata_agent import MetadataAgent
 from app.agents.purchase_agent import PurchaseAgent
 from app.agents.recommendation_agent import RecommendationAgent
 from app.agents.style_profile_agent import StyleProfileAgent
 from app.agents.vision_agent import VisionAgent
+from app.db import vector_store
 from app.models.outfit import Outfit
 
 
@@ -28,6 +30,7 @@ class AgentOrchestrator:
         self.context_agent = ContextAgent()
         self.recommendation_agent = RecommendationAgent()
         self.purchase_agent = PurchaseAgent()
+        self.extraction_agent = ExtractionAgent()
         # LLMAgent isn't called directly here — StyleProfileAgent owns its own
         # instance (the only current consumer; see app/agents/style_profile_agent.py).
 
@@ -89,9 +92,23 @@ class AgentOrchestrator:
             .all()
         )
 
-    def evaluate_purchase(self, *, user_id: uuid.UUID, image_url: str) -> dict[str, Any]:
+    def extract_garments(self, *, image_url: str) -> dict[str, Any]:
+        return self.extraction_agent.run(image_url=image_url)
+
+    def evaluate_purchase(
+        self, *, user_id: uuid.UUID, image_url: str, price: float | None = None,
+        category: str | None = None,
+    ) -> dict[str, Any]:
         attributes = self.vision_agent.run(image_url=image_url)
-        return self.purchase_agent.run(image_url=image_url, attributes=attributes, user_id=user_id)
+        if category and attributes["category"] != "hors_perimetre":
+            # Category already decided on this cut-out by ExtractionAgent (segmentation
+            # label + classifier) — more reliable than re-guessing it from the crop alone.
+            attributes["category"] = category
+        wardrobe = self.metadata_agent.run(user_id=user_id)
+        embeddings = vector_store.fetch_embeddings([item.id for item in wardrobe["items"]])
+        return self.purchase_agent.run(
+            attributes=attributes, wardrobe_items=wardrobe["items"], embeddings=embeddings, price=price,
+        )
 
     def get_style_profile(self, *, user_id: uuid.UUID) -> dict[str, Any]:
         return self.style_profile_agent.run(user_id=user_id)
