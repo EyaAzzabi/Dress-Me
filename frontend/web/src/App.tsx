@@ -2,6 +2,7 @@ import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import {
   api,
   ClothingItem,
+  ItemUsage,
   CurrentUser,
   getApiError,
   Outfit,
@@ -10,6 +11,8 @@ import {
   ScheduledOutfit,
   StyleProfile,
   uploadPhoto,
+  parseLowCategoryConfidence,
+  LowCategoryConfidence,
 } from "./api";
 import "./styles.css";
 
@@ -53,7 +56,17 @@ const OCCASIONS = [
   ["événement", "Événement"],
 ];
 const CITIES = ["Tunis", "Sousse", "Sfax", "Djerba"];
+const WARDROBE_CATEGORIES: [string, string][] = [["haut", "Haut"], ["bas", "Bas"], ["robe", "Robe"], ["veste", "Veste"], ["chaussures", "Chaussures"], ["sac", "Sac"], ["accessoire", "Accessoire"]];
+
+interface CategoryPromptState extends LowCategoryConfidence {
+  imageUrl: string;
+  season: string;
+}
+
 const SEASONS = ["printemps", "été", "automne", "hiver"];
+// Wardrobe-item seasons: same vocabulary the backend validates (ClothingItem season).
+const ITEM_SEASONS: [string, string][] = [["ete", "☀️ Été"], ["hiver", "❄️ Hiver"], ["mi_saison", "🍂 Mi-saison"], ["toutes_saisons", "🌍 Toutes saisons"]];
+const itemSeasonLabel = (value: string | null | undefined) => ITEM_SEASONS.find(([key]) => key === value)?.[1] ?? null;
 const WARDROBE_FAVORITES_KEY = "dressme_wardrobe_favorites";
 const OUTFIT_FAVORITES_KEY = "dressme_favorite_outfits";
 
@@ -184,6 +197,8 @@ export default function App() {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [screen, setScreen] = useState<Screen>("overview");
   const [items, setItems] = useState<ClothingItem[]>([]);
+  const [usage, setUsage] = useState<Record<string, ItemUsage>>({});
+  const [categoryPrompt, setCategoryPrompt] = useState<CategoryPromptState | null>(null);
   const [outfits, setOutfits] = useState<Outfit[]>([]);
   const [scheduled, setScheduled] = useState<ScheduledOutfit[]>([]);
   const [profile, setProfile] = useState<StyleProfile | null>(null);
@@ -201,6 +216,15 @@ export default function App() {
   const selectedNav = NAV_ITEMS.find((item) => item.id === screen);
   const displayName = user?.full_name?.split(/\s+/)[0] || "toi";
   const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
+
+  useEffect(() => {
+    if (!token || screen !== "wardrobe") return;
+    let active = true;
+    api.get<ItemUsage[]>("/wardrobe/usage")
+      .then(({ data }) => { if (active) setUsage(Object.fromEntries(data.map((entry) => [entry.item_id, entry]))); })
+      .catch(() => { /* usage is a nicety; the wardrobe still works without it */ });
+    return () => { active = false; };
+  }, [token, screen]);
 
   useEffect(() => {
     if (!token) {
@@ -338,18 +362,63 @@ export default function App() {
     setNotice("");
   }
 
+  async function submitItem(imageUrl: string, season: string, category?: string) {
+    const { data } = await api.post<ClothingItem>("/wardrobe/", { image_url: imageUrl, season: season || undefined, category });
+    setItems((current) => [data, ...current]);
+    setNotice("La pièce a été analysée et ajoutée à ton dressing.");
+  }
+
   async function addItem(file: File, season: string) {
     setBusy("wardrobe-upload");
     setError("");
     try {
       const imageUrl = await uploadPhoto(file);
-      const { data } = await api.post<ClothingItem>("/wardrobe/", { image_url: imageUrl, season: season || undefined });
-      setItems((current) => [data, ...current]);
-      setNotice("La pièce a été analysée et ajoutée à ton dressing.");
+      try {
+        await submitItem(imageUrl, season);
+      } catch (cause: unknown) {
+        // The model isn't sure what this photo shows (often several pieces at once): ask
+        // the owner to confirm the category instead of saving a likely-wrong one.
+        const unsure = parseLowCategoryConfidence(cause);
+        if (!unsure) throw cause;
+        setCategoryPrompt({ ...unsure, imageUrl, season });
+      }
     } catch (cause: unknown) {
       reportError(cause);
     } finally {
       setBusy("");
+    }
+  }
+
+  async function confirmCategory(category: string) {
+    if (!categoryPrompt) return;
+    setBusy("wardrobe-upload");
+    try {
+      await submitItem(categoryPrompt.imageUrl, categoryPrompt.season, category);
+      setCategoryPrompt(null);
+    } catch (cause: unknown) {
+      reportError(cause);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function markWorn(item: ClothingItem) {
+    try {
+      const { data } = await api.post<ItemUsage>(`/wardrobe/${item.id}/worn`);
+      setUsage((current) => ({ ...current, [data.item_id]: data }));
+      setNotice("C'est noté : pièce portée aujourd'hui.");
+    } catch (cause: unknown) {
+      reportError(cause);
+    }
+  }
+
+  async function changeSeason(item: ClothingItem, season: string) {
+    try {
+      const { data } = await api.patch<ClothingItem>(`/wardrobe/${item.id}`, { season });
+      setItems((current) => current.map((currentItem) => (currentItem.id === data.id ? data : currentItem)));
+      setNotice("La saison de la pièce a été enregistrée.");
+    } catch (cause: unknown) {
+      reportError(cause);
     }
   }
 
@@ -425,6 +494,18 @@ export default function App() {
     }
   }
 
+  async function renderCalendarOutfit(date: string) {
+    setError("");
+    try {
+      // Slow on purpose: one paid try-on call per garment, so it only runs when asked.
+      const { data } = await api.post<ScheduledOutfit>(`/calendar/${date}/render`);
+      setScheduled((current) => current.map((entry) => (entry.date === data.date ? data : entry)));
+      setNotice("Ton avatar porte la tenue du jour.");
+    } catch (cause: unknown) {
+      reportError(cause);
+    }
+  }
+
   async function removeCalendarOutfit(date: string) {
     try {
       await api.delete(`/calendar/${date}`);
@@ -446,6 +527,7 @@ export default function App() {
         destination: String(form.get("destination")).trim(),
         duration_days: Number(form.get("duration")),
         trip_type: String(form.get("tripType")),
+        start_date: String(form.get("startDate") || "") || undefined,
       });
       setPackingLists((current) => [data, ...current]);
       formElement.reset();
@@ -616,9 +698,9 @@ export default function App() {
             </>
           )}
 
-          {screen === "wardrobe" && <WardrobeView items={items} favorites={wardrobeFavorites} busy={busy} onAdd={addItem} onDelete={deleteItem} onToggleFavorite={(id) => toggleFavorite(id, "wardrobe")} />}
+          {screen === "wardrobe" && <WardrobeView items={items} favorites={wardrobeFavorites} busy={busy} onAdd={addItem} onDelete={deleteItem} usage={usage} categoryPrompt={categoryPrompt} onConfirmCategory={confirmCategory} onCancelCategory={() => setCategoryPrompt(null)} onWorn={markWorn} onSeasonChange={changeSeason} onToggleFavorite={(id) => toggleFavorite(id, "wardrobe")} />}
           {screen === "outfits" && <OutfitsView items={items} itemsById={itemsById} outfits={outfits} favorites={outfitFavorites} scheduled={scheduled} today={today} busy={busy} onGenerate={generateLooks} onToggleFavorite={(id) => toggleFavorite(id, "outfit")} onSchedule={scheduleOutfit} />}
-          {screen === "calendar" && <CalendarView anchor={monthAnchor} onMonthChange={setMonthAnchor} scheduled={scheduled} items={items} loading={loading} onSave={saveCalendarOutfit} onRemove={removeCalendarOutfit} />}
+          {screen === "calendar" && <CalendarView anchor={monthAnchor} onMonthChange={setMonthAnchor} scheduled={scheduled} items={items} loading={loading} onSave={saveCalendarOutfit} onRemove={removeCalendarOutfit}  onRender={renderCalendarOutfit} />}
           {screen === "profile" && <ProfileView user={user} profile={profile} busy={busy} onAvatar={uploadAvatar} onNavigate={navigate} />}
           {screen === "packing" && <PackingView lists={packingLists} busy={busy} onCreate={createPacking} onToggle={togglePackedItem} onDelete={deletePackingList} />}
           {screen === "purchase" && <PurchaseView result={purchaseResult} busy={busy} onCheck={runPurchaseCheck} />}
@@ -639,12 +721,40 @@ function EmptyState({ icon, title, text, action, onAction }: { icon: string; tit
   return <div className="empty-state"><span>{icon}</span><h3>{title}</h3><p>{text}</p>{action && onAction && <button type="button" className="button button-outline" onClick={onAction}>{action} →</button>}</div>;
 }
 
-function WardrobeView({ items, favorites, busy, onAdd, onDelete, onToggleFavorite }: {
+function CategoryPrompt({ prompt, busy, onConfirm, onCancel }: {
+  prompt: CategoryPromptState;
+  busy: boolean;
+  onConfirm: (category: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [category, setCategory] = useState(prompt.suggested_category);
+  return <section className="content-card category-prompt" role="alert">
+    <img src={prompt.imageUrl} alt="Photo à classer" />
+    <div>
+      <span className="eyebrow">ON A BESOIN DE TOI</span>
+      <h3>Quelle est cette pièce ?</h3>
+      <p>{prompt.message} (DressMe hésite : « {categoryLabel(prompt.suggested_category)} », sûr à {Math.round(prompt.confidence * 100)} %.)</p>
+      <div className="button-row">
+        <select value={category} onChange={(event) => setCategory(event.target.value)} aria-label="Catégorie de la pièce">{WARDROBE_CATEGORIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+        <button type="button" className="button button-primary" disabled={busy} onClick={() => void onConfirm(category)}>{busy ? "Ajout…" : "Ajouter comme ça"}</button>
+        <button type="button" className="button button-outline" disabled={busy} onClick={onCancel}>Annuler</button>
+      </div>
+    </div>
+  </section>;
+}
+
+function WardrobeView({ items, favorites, busy, usage, categoryPrompt, onConfirmCategory, onCancelCategory, onAdd, onDelete, onWorn, onSeasonChange, onToggleFavorite }: {
   items: ClothingItem[];
   favorites: string[];
   busy: string;
   onAdd: (file: File, season: string) => Promise<void>;
   onDelete: (item: ClothingItem) => Promise<void>;
+  usage: Record<string, ItemUsage>;
+  categoryPrompt: CategoryPromptState | null;
+  onConfirmCategory: (category: string) => Promise<void>;
+  onCancelCategory: () => void;
+  onWorn: (item: ClothingItem) => Promise<void>;
+  onSeasonChange: (item: ClothingItem, season: string) => Promise<void>;
   onToggleFavorite: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -654,16 +764,16 @@ function WardrobeView({ items, favorites, busy, onAdd, onDelete, onToggleFavorit
   const filtered = items.filter((item) => {
     const matchesCategory = category === "toutes" || (item.category ?? "autre").toLocaleLowerCase() === category;
     const matchesFavorite = !favoritesOnly || favorites.includes(item.id);
-    const searchable = [item.category, item.style, item.season, item.pattern, ...(item.colors ?? [])].join(" ").toLocaleLowerCase();
+    const searchable = [item.category, item.style, item.season, itemSeasonLabel(item.season), item.pattern, ...(item.colors ?? [])].join(" ").toLocaleLowerCase();
     return matchesCategory && matchesFavorite && searchable.includes(query.trim().toLocaleLowerCase());
   });
   const categories = Array.from(new Set(items.map((item) => (item.category ?? "autre").toLocaleLowerCase()))).sort();
 
   return <>
     <PageHeading title="Mon dressing" subtitle="Ajoute, retrouve et organise les pièces que tu aimes porter." action={<label className={`button button-primary file-button${busy === "wardrobe-upload" ? " is-disabled" : ""}`}>＋ {busy === "wardrobe-upload" ? "Analyse en cours…" : "Ajouter une pièce"}<input type="file" accept="image/*" disabled={busy === "wardrobe-upload"} onChange={(event) => { const file = event.target.files?.[0]; if (file) void onAdd(file, season); event.target.value = ""; }} /></label>} />
-    <div className="wardrobe-toolbar"><label className="search-field"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Chercher une couleur, un style…" /></label><label className="filter-select"><span>Catégorie</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="toutes">Toutes</option>{categories.map((value) => <option key={value} value={value}>{categoryLabel(value)}</option>)}</select></label><button type="button" className={`filter-favorite${favoritesOnly ? " is-selected" : ""}`} aria-pressed={favoritesOnly} onClick={() => setFavoritesOnly((current) => !current)}>♡ Favoris</button><label className="season-select"><span>Saison de la pièce (facultatif)</span><select value={season} onChange={(event) => setSeason(event.target.value)}><option value="">Non précisée</option>{SEASONS.map((value) => <option key={value} value={value}>{categoryLabel(value)}</option>)}</select></label></div>
-    <div className="results-line"><span><b>{filtered.length}</b> pièce{filtered.length === 1 ? "" : "s"} {favoritesOnly ? "dans tes favoris" : "dans ton dressing"}</span><span>Ajoute une photo nette d’une seule pièce pour une meilleure analyse.</span></div>
-    {filtered.length === 0 ? <EmptyState icon={items.length === 0 ? "◈" : "⌕"} title={items.length === 0 ? "Ton dressing commence ici" : "Aucune pièce trouvée"} text={items.length === 0 ? "Ajoute une photo de vêtement : DressMe identifiera sa catégorie, ses couleurs et son style." : "Essaie d’ajuster ta recherche ou tes filtres."} /> : <div className="clothing-grid">{filtered.map((item) => <article className="clothing-card" key={item.id}><div className="clothing-photo"><img src={item.image_url} alt={categoryLabel(item.category)} loading="lazy" /><button type="button" className={`favorite-toggle${favorites.includes(item.id) ? " is-favorite" : ""}`} aria-label={favorites.includes(item.id) ? "Retirer des favoris" : "Ajouter aux favoris"} aria-pressed={favorites.includes(item.id)} onClick={() => onToggleFavorite(item.id)}>{favorites.includes(item.id) ? "♥" : "♡"}</button></div><div className="clothing-info"><span className="category-pill">{categoryLabel(item.category)}</span><h3>{item.style ? categoryLabel(item.style) : "Pièce de mon dressing"}</h3><p>{[...(item.colors ?? []), item.season, item.pattern].filter(Boolean).map(categoryLabel).join(" · ") || "Style à découvrir"}</p><button type="button" className="remove-link" onClick={() => void onDelete(item)}>Retirer du dressing</button></div></article>)}</div>}
+    {categoryPrompt && <CategoryPrompt prompt={categoryPrompt} busy={busy === "wardrobe-upload"} onConfirm={onConfirmCategory} onCancel={onCancelCategory} />}<div className="wardrobe-toolbar"><label className="search-field"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Chercher une couleur, un style…" /></label><label className="filter-select"><span>Catégorie</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="toutes">Toutes</option>{categories.map((value) => <option key={value} value={value}>{categoryLabel(value)}</option>)}</select></label><button type="button" className={`filter-favorite${favoritesOnly ? " is-selected" : ""}`} aria-pressed={favoritesOnly} onClick={() => setFavoritesOnly((current) => !current)}>♡ Favoris</button><label className="season-select"><span>Saison de la pièce (facultatif)</span><select value={season} onChange={(event) => setSeason(event.target.value)}><option value="">Non précisée</option>{ITEM_SEASONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
+    <div className="results-line"><span><b>{filtered.length}</b> pièce{filtered.length === 1 ? "" : "s"} {favoritesOnly ? "dans tes favoris" : "dans ton dressing"}{items.some((item) => item.season_source === "vision" || !item.season) && <span className="confirm-badge">{items.filter((item) => item.season_source === "vision" || !item.season).length} à confirmer</span>}</span><span>Ajoute une photo nette d’une seule pièce pour une meilleure analyse.</span></div>
+    {filtered.length === 0 ? <EmptyState icon={items.length === 0 ? "◈" : "⌕"} title={items.length === 0 ? "Ton dressing commence ici" : "Aucune pièce trouvée"} text={items.length === 0 ? "Ajoute une photo de vêtement : DressMe identifiera sa catégorie, ses couleurs et son style." : "Essaie d’ajuster ta recherche ou tes filtres."} /> : <div className="clothing-grid">{filtered.map((item) => <article className="clothing-card" key={item.id}><div className="clothing-photo"><img src={item.image_url} alt={categoryLabel(item.category)} loading="lazy" /><button type="button" className={`favorite-toggle${favorites.includes(item.id) ? " is-favorite" : ""}`} aria-label={favorites.includes(item.id) ? "Retirer des favoris" : "Ajouter aux favoris"} aria-pressed={favorites.includes(item.id)} onClick={() => onToggleFavorite(item.id)}>{favorites.includes(item.id) ? "♥" : "♡"}</button></div><div className="clothing-info"><span className="category-pill">{categoryLabel(item.category)}</span><h3>{item.style ? categoryLabel(item.style) : "Pièce de mon dressing"}</h3><p>{[...(item.colors ?? []), item.pattern].filter(Boolean).map(categoryLabel).join(" · ") || "Style à découvrir"}</p><label className="season-picker"><select aria-label="Saison de la pièce" value={item.season ?? ""} onChange={(event) => { if (event.target.value) void onSeasonChange(item, event.target.value); }}><option value="" disabled>Saison ?</option>{ITEM_SEASONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>{(item.season_source === "vision" || !item.season) && <span className="confirm-badge">À confirmer</span>}</label><p className="usage-line">{usage[item.id] ? `Porté ${usage[item.id].wear_count}× · dernière fois le ${new Date(usage[item.id].last_worn).toLocaleDateString("fr-FR")}` : "Jamais porté"} <button type="button" className="worn-button" onClick={() => void onWorn(item)}>Je l’ai porté</button></p><button type="button" className="remove-link" onClick={() => void onDelete(item)}>Retirer du dressing</button></div></article>)}</div>}
   </>;
 }
 
@@ -699,7 +809,12 @@ function OutfitsView({ items, itemsById, outfits, favorites, scheduled, today, b
   </>;
 }
 
-function CalendarView({ anchor, onMonthChange, scheduled, items, loading, onSave, onRemove }: {
+function DayThumb({ plan }: { plan: ScheduledOutfit }) {
+  if (plan.render_image_url) return <img className="day-thumb" src={plan.render_image_url} alt="" loading="lazy" />;
+  return <span className="day-collage" aria-hidden="true">{plan.items.slice(0, 4).map((item) => <img key={item.id} src={item.image_url} alt="" loading="lazy" />)}</span>;
+}
+
+function CalendarView({ anchor, onMonthChange, scheduled, items, loading, onSave, onRemove, onRender }: {
   anchor: Date;
   onMonthChange: (date: Date) => void;
   scheduled: ScheduledOutfit[];
@@ -707,7 +822,9 @@ function CalendarView({ anchor, onMonthChange, scheduled, items, loading, onSave
   loading: boolean;
   onSave: (date: string, ids: string[]) => Promise<ScheduledOutfit>;
   onRemove: (date: string) => Promise<void>;
+  onRender: (date: string) => Promise<void>;
 }) {
+  const [rendering, setRendering] = useState(false);
   const [selectedDate, setSelectedDate] = useState(todayLocal());
   const [editing, setEditing] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -724,6 +841,15 @@ function CalendarView({ anchor, onMonthChange, scheduled, items, loading, onSave
     onMonthChange(next);
     setSelectedDate(dayString(next));
     setEditing(false);
+  }
+
+  async function renderOnAvatar() {
+    setRendering(true);
+    try {
+      await onRender(selectedDate);
+    } finally {
+      setRendering(false);
+    }
   }
 
   function startEdit() {
@@ -749,10 +875,11 @@ function CalendarView({ anchor, onMonthChange, scheduled, items, loading, onSave
       <section className="content-card calendar-card"><div className="calendar-month-header"><button type="button" className="month-arrow" aria-label="Mois précédent" onClick={() => changeMonth(-1)}>‹</button><div><span className="eyebrow">TON AGENDA STYLE</span><h2>{monthName}</h2></div><button type="button" className="month-arrow" aria-label="Mois suivant" onClick={() => changeMonth(1)}>›</button></div><div className="calendar-grid">{["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((day) => <span className="weekday" key={day}>{day}</span>)}{days.map((day, index) => {
         if (!day) return <span className="calendar-blank" key={`blank-${index}`} />;
         const date = `${anchor.getFullYear()}-${String(anchor.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-        const hasOutfit = scheduled.some((entry) => entry.date === date);
-        return <button type="button" key={date} className={`calendar-day${selectedDate === date ? " selected" : ""}${date === todayLocal() ? " is-today" : ""}`} aria-label={`${day}${hasOutfit ? ", tenue planifiée" : ""}`} aria-pressed={selectedDate === date} onClick={() => { setSelectedDate(date); setEditing(false); }}><span>{day}</span>{hasOutfit && <i />}</button>;
+        const dayPlan = scheduled.find((entry) => entry.date === date);
+        const hasOutfit = Boolean(dayPlan);
+        return <button type="button" key={date} className={`calendar-day${hasOutfit ? " has-outfit" : ""}${selectedDate === date ? " selected" : ""}${date === todayLocal() ? " is-today" : ""}`} aria-label={`${day}${hasOutfit ? ", tenue planifiée" : ""}`} aria-pressed={selectedDate === date} onClick={() => { setSelectedDate(date); setEditing(false); }}>{dayPlan && <DayThumb plan={dayPlan} />}<span>{day}</span></button>;
       })}</div>{loading && <p className="inline-hint">Chargement du calendrier…</p>}</section>
-      <section className="content-card day-details"><span className="eyebrow">TA JOURNÉE</span><h2>{new Date(`${selectedDate}T12:00:00`).toLocaleDateString("fr-TN", { weekday: "long", day: "numeric", month: "long" })}</h2>{plan && !editing ? <><div className="day-plan-images">{plan.items.map((item) => <div key={item.id}><img src={item.image_url} alt={categoryLabel(item.category)} /><span>{categoryLabel(item.category)}</span></div>)}</div><p className="inline-hint">{plan.items.length} pièce{plan.items.length === 1 ? "" : "s"} choisie{plan.items.length === 1 ? "" : "s"} pour cette journée.</p><div className="button-row"><button type="button" className="button button-primary" onClick={startEdit}>Modifier la tenue</button><button type="button" className="button button-danger-light" onClick={() => void onRemove(selectedDate)}>Retirer</button></div></> : !editing ? <><div className="day-empty-icon">✧</div><p className="inline-hint">Aucune tenue prévue. Choisis des pièces pour préparer ta journée.</p><button type="button" className="button button-primary" onClick={startEdit}>＋ Planifier un look</button></> : <><p className="inline-hint">Sélectionne les pièces de ton dressing à porter ce jour.</p><div className="calendar-pick-grid">{items.map((item) => <button type="button" className={`calendar-pick-item${selectedIds.includes(item.id) ? " picked" : ""}`} aria-pressed={selectedIds.includes(item.id)} key={item.id} onClick={() => setSelectedIds((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])}><img src={item.image_url} alt={categoryLabel(item.category)} /><span>{categoryLabel(item.category)}</span></button>)}</div>{items.length === 0 && <p className="inline-hint">Ajoute des pièces au dressing avant de planifier.</p>}<div className="button-row"><button type="button" className="button button-primary" disabled={saving || selectedIds.length === 0} onClick={() => void save()}>{saving ? "Enregistrement…" : "Enregistrer"}</button><button type="button" className="button button-ghost" onClick={() => setEditing(false)}>Annuler</button></div></>}</section>
+      <section className="content-card day-details"><span className="eyebrow">TA JOURNÉE</span><h2>{new Date(`${selectedDate}T12:00:00`).toLocaleDateString("fr-TN", { weekday: "long", day: "numeric", month: "long" })}</h2>{plan && !editing ? <>{plan.render_image_url && <img className="avatar-render" src={plan.render_image_url} alt="Toi avec la tenue de ce jour" />}<div className="day-plan-images">{plan.items.map((item) => <div key={item.id}><img src={item.image_url} alt={categoryLabel(item.category)} /><span>{categoryLabel(item.category)}</span></div>)}</div><p className="inline-hint">{plan.items.length} pièce{plan.items.length === 1 ? "" : "s"} choisie{plan.items.length === 1 ? "" : "s"} pour cette journée.</p><div className="button-row">{!plan.render_image_url && <button type="button" className="button button-outline" disabled={rendering} onClick={() => void renderOnAvatar()}>{rendering ? "Création du rendu… (≈ 1 min)" : "✦ Voir sur mon avatar"}</button>}<button type="button" className="button button-primary" onClick={startEdit}>Modifier la tenue</button><button type="button" className="button button-danger-light" onClick={() => void onRemove(selectedDate)}>Retirer</button></div></> : !editing ? <><div className="day-empty-icon">✧</div><p className="inline-hint">Aucune tenue prévue. Choisis des pièces pour préparer ta journée.</p><button type="button" className="button button-primary" onClick={startEdit}>＋ Planifier un look</button></> : <><p className="inline-hint">Sélectionne les pièces de ton dressing à porter ce jour.</p><div className="calendar-pick-grid">{items.map((item) => <button type="button" className={`calendar-pick-item${selectedIds.includes(item.id) ? " picked" : ""}`} aria-pressed={selectedIds.includes(item.id)} key={item.id} onClick={() => setSelectedIds((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])}><img src={item.image_url} alt={categoryLabel(item.category)} /><span>{categoryLabel(item.category)}</span></button>)}</div>{items.length === 0 && <p className="inline-hint">Ajoute des pièces au dressing avant de planifier.</p>}<div className="button-row"><button type="button" className="button button-primary" disabled={saving || selectedIds.length === 0} onClick={() => void save()}>{saving ? "Enregistrement…" : "Enregistrer"}</button><button type="button" className="button button-ghost" onClick={() => setEditing(false)}>Annuler</button></div></>}</section>
     </div>
   </>;
 }
@@ -780,7 +907,7 @@ function PackingView({ lists, busy, onCreate, onToggle, onDelete }: {
 }) {
   return <>
     <PageHeading title="Prête pour le voyage" subtitle="Une valise pensée selon ta destination, la durée et les pièces de ton dressing." />
-    <form className="content-card packing-form" onSubmit={(event) => void onCreate(event)}><div className="card-heading"><div><span className="eyebrow">NOUVELLE ESCAPADE</span><h3>Où part-on ?</h3></div><span className="form-sparkle">✈</span></div><div className="form-grid"><label className="field"><span>Destination</span><input name="destination" required placeholder="Ex. Djerba" /></label><label className="field"><span>Durée (jours)</span><input name="duration" type="number" min="1" max="90" defaultValue="3" required /></label><label className="field"><span>Type de voyage</span><select name="tripType" defaultValue="plage"><option value="plage">Plage & détente</option><option value="business">Professionnel</option><option value="tourisme">Tourisme & découverte</option></select></label></div><div className="form-submit-row"><p>DressMe sélectionnera des pièces adaptées à ton voyage.</p><button className="button button-primary" disabled={busy === "packing-create"}>{busy === "packing-create" ? "Préparation…" : "Créer ma liste →"}</button></div></form>{lists.length === 0 ? <EmptyState icon="▣" title="Aucun voyage prévu" text="Crée une liste pour préparer ta prochaine valise depuis ton dressing." /> : <div className="packing-list-grid">{lists.map((list) => <article className="content-card packing-list-card" key={list.id}><div className="packing-list-heading"><div><span className="category-pill">{list.duration_days} jours · {list.trip_type}</span><h3>{list.destination}</h3></div><button className="remove-link" type="button" onClick={() => void onDelete(list.id)}>Supprimer</button></div><div className="packing-progress"><span>{list.checked_item_ids.length} / {list.items.length} pièces dans la valise</span><i><b style={{ width: `${list.items.length ? (list.checked_item_ids.length / list.items.length) * 100 : 0}%` }} /></i></div><div className="packing-items">{list.items.map((item) => { const checked = list.checked_item_ids.includes(item.id); return <label className={`packing-item${checked ? " packed" : ""}`} key={item.id}><input type="checkbox" checked={checked} onChange={() => void onToggle(list, item.id)} /><img src={item.image_url} alt="" /><span>{categoryLabel(item.category)}</span></label>; })}</div>{list.items.length === 0 && <p className="inline-hint">Ajoute plus de pièces à ton dressing pour enrichir cette liste.</p>}</article>)}</div>}
+    <form className="content-card packing-form" onSubmit={(event) => void onCreate(event)}><div className="card-heading"><div><span className="eyebrow">NOUVELLE ESCAPADE</span><h3>Où part-on ?</h3></div><span className="form-sparkle">✈</span></div><div className="form-grid"><label className="field"><span>Destination</span><input name="destination" required placeholder="Ex. Djerba" /></label><label className="field"><span>Durée (jours)</span><input name="duration" type="number" min="1" max="90" defaultValue="3" required /></label><label className="field"><span>Type de voyage</span><select name="tripType" defaultValue="plage"><option value="plage">Plage & détente</option><option value="business">Professionnel</option><option value="tourisme">Tourisme & découverte</option></select></label><label className="field"><span>Date de départ (facultatif)</span><input name="startDate" type="date" /></label></div><div className="form-submit-row"><p>DressMe sélectionnera des pièces adaptées à ton voyage.</p><button className="button button-primary" disabled={busy === "packing-create"}>{busy === "packing-create" ? "Préparation…" : "Créer ma liste →"}</button></div></form>{lists.length === 0 ? <EmptyState icon="▣" title="Aucun voyage prévu" text="Crée une liste pour préparer ta prochaine valise depuis ton dressing." /> : <div className="packing-list-grid">{lists.map((list) => <article className="content-card packing-list-card" key={list.id}><div className="packing-list-heading"><div><span className="category-pill">{list.duration_days} jours · {list.trip_type}{list.season && ` · ${itemSeasonLabel(list.season)}`}</span><h3>{list.destination}</h3></div><button className="remove-link" type="button" onClick={() => void onDelete(list.id)}>Supprimer</button></div><div className="packing-progress"><span>{list.checked_item_ids.length} / {list.items.length} pièces dans la valise</span><i><b style={{ width: `${list.items.length ? (list.checked_item_ids.length / list.items.length) * 100 : 0}%` }} /></i></div><div className="packing-items">{list.items.map((item) => { const checked = list.checked_item_ids.includes(item.id); return <label className={`packing-item${checked ? " packed" : ""}`} key={item.id}><input type="checkbox" checked={checked} onChange={() => void onToggle(list, item.id)} /><img src={item.image_url} alt="" /><span>{categoryLabel(item.category)}</span></label>; })}</div>{list.items.length === 0 && <p className="inline-hint">Ajoute plus de pièces à ton dressing pour enrichir cette liste.</p>}</article>)}</div>}
   </>;
 }
 

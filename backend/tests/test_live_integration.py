@@ -120,6 +120,21 @@ def haut_and_bas_candidates():
     return hauts, bas_
 
 
+def _post_item(client, auth_headers, image_url):
+    """Adds a wardrobe item the way the apps do: if the model isn't sure of the category
+    (422 low_category_confidence — common on real catalog shots), confirm its suggestion."""
+    response = client.post("/api/v1/wardrobe/", json={"image_url": image_url}, headers=auth_headers)
+    if response.status_code == 422 and isinstance(response.json().get("detail"), dict):
+        detail = response.json()["detail"]
+        if detail.get("code") == "low_category_confidence":
+            response = client.post(
+                "/api/v1/wardrobe/",
+                json={"image_url": image_url, "category": detail["suggested_category"]},
+                headers=auth_headers,
+            )
+    return response
+
+
 def test_register_and_login(client, registered_user):
     email, password, _ = registered_user
 
@@ -139,13 +154,11 @@ def test_duplicate_registration_is_rejected(client, registered_user):
 def test_wardrobe_crud_with_real_vision_inference(client, auth_headers, two_real_image_urls):
     haut_url, _ = two_real_image_urls
 
-    created = client.post(
-        "/api/v1/wardrobe/", json={"image_url": haut_url}, headers=auth_headers
-    )
+    created = _post_item(client, auth_headers, haut_url)
     assert created.status_code == 201, created.text
     item = created.json()
     assert item["category"] in {"haut", "bas", "robe", "veste", "chaussures", "sac", "accessoire"}
-    assert isinstance(item["colors"], list) and len(item["colors"]) == 1
+    assert isinstance(item["colors"], list) and 1 <= len(item["colors"]) <= 3
 
     listed = client.get("/api/v1/wardrobe/", headers=auth_headers)
     assert listed.status_code == 200
@@ -160,8 +173,8 @@ def test_wardrobe_crud_with_real_vision_inference(client, auth_headers, two_real
 
 def test_style_profile_reflects_the_real_wardrobe(client, auth_headers, two_real_image_urls):
     haut_url, bas_url = two_real_image_urls
-    client.post("/api/v1/wardrobe/", json={"image_url": haut_url}, headers=auth_headers)
-    client.post("/api/v1/wardrobe/", json={"image_url": bas_url}, headers=auth_headers)
+    _post_item(client, auth_headers, haut_url)
+    _post_item(client, auth_headers, bas_url)
 
     profile = client.get("/api/v1/style-profile/", headers=auth_headers)
 
@@ -181,7 +194,7 @@ def _add_item_with_category(client, auth_headers, candidate_urls, wanted_categor
     created item, or None if no candidate matched (the test skips rather than flakes
     if that ever happens)."""
     for url in candidate_urls:
-        response = client.post("/api/v1/wardrobe/", json={"image_url": url}, headers=auth_headers)
+        response = _post_item(client, auth_headers, url)
         if response.status_code != 201:
             continue
         item = response.json()
@@ -247,9 +260,7 @@ def test_purchase_check_without_a_wardrobe(client, auth_headers, two_real_image_
 
 def test_calendar_plan_get_list_and_unplan(client, auth_headers, two_real_image_urls):
     haut_url, _ = two_real_image_urls
-    item = client.post(
-        "/api/v1/wardrobe/", json={"image_url": haut_url}, headers=auth_headers
-    ).json()
+    item = _post_item(client, auth_headers, haut_url).json()
 
     day = "2026-11-15"
     planned = client.put(
@@ -293,12 +304,8 @@ def test_calendar_rejects_items_not_owned(client, auth_headers):
 
 def test_calendar_replanning_a_day_replaces_not_stacks(client, auth_headers, two_real_image_urls):
     haut_url, bas_url = two_real_image_urls
-    item1 = client.post(
-        "/api/v1/wardrobe/", json={"image_url": haut_url}, headers=auth_headers
-    ).json()
-    item2 = client.post(
-        "/api/v1/wardrobe/", json={"image_url": bas_url}, headers=auth_headers
-    ).json()
+    item1 = _post_item(client, auth_headers, haut_url).json()
+    item2 = _post_item(client, auth_headers, bas_url).json()
 
     day = "2026-12-01"
     client.put(f"/api/v1/calendar/{day}", json={"item_ids": [item1["id"]]}, headers=auth_headers)
@@ -317,8 +324,8 @@ def test_calendar_replanning_a_day_replaces_not_stacks(client, auth_headers, two
 
 def test_packing_list_generation_check_and_delete(client, auth_headers, two_real_image_urls):
     haut_url, bas_url = two_real_image_urls
-    client.post("/api/v1/wardrobe/", json={"image_url": haut_url}, headers=auth_headers)
-    client.post("/api/v1/wardrobe/", json={"image_url": bas_url}, headers=auth_headers)
+    _post_item(client, auth_headers, haut_url)
+    _post_item(client, auth_headers, bas_url)
 
     created = client.post(
         "/api/v1/packing/",
@@ -371,9 +378,7 @@ def test_tryon_requires_avatar_before_items(client, auth_headers, two_real_image
     monkeypatch.setattr(tryon_route.tryon_agent, "is_configured", lambda: False)
 
     haut_url, _ = two_real_image_urls
-    item = client.post(
-        "/api/v1/wardrobe/", json={"image_url": haut_url}, headers=auth_headers
-    ).json()
+    item = _post_item(client, auth_headers, haut_url).json()
 
     without_avatar = client.post(
         "/api/v1/tryon/", json={"garment_item_id": item["id"]}, headers=auth_headers

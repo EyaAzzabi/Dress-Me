@@ -50,6 +50,22 @@ class Settings(BaseSettings):
     # (e.g. search "idm-vton" or "ootdiffusion" on replicate.com) rather than guessed.
     replicate_api_token: str | None = None
     replicate_tryon_model_version: str | None = None
+    # Whether to send a `category` (upper_body | lower_body | dresses) input to the model —
+    # IDM-VTON-style models accept it and need it to dress the legs or a dress correctly;
+    # other models may reject unknown inputs, so it's opt-in. Full-outfit renders (calendar)
+    # only look right with it on.
+    replicate_tryon_send_category: bool = False
+
+    # Free alternative to Replicate: a public Hugging Face Space (default: OOTDiffusion,
+    # which dresses upper body, lower body and dresses). No billing — it runs on shared
+    # ZeroGPU, so it can queue, and anonymous use has a small daily GPU quota; a free
+    # Hugging Face account token (HF_TOKEN) raises that quota. Public Spaces can also be
+    # paused or removed by their owners — change hf_tryon_space if that happens.
+    # tryon_provider: auto (Replicate when its credentials are set, else Hugging Face) |
+    # replicate | huggingface.
+    tryon_provider: str = "auto"
+    hf_tryon_space: str = "levihsu/OOTDiffusion"
+    hf_token: str | None = None
 
     class Config:
         env_file = ".env"

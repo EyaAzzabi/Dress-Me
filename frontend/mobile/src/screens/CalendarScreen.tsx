@@ -2,7 +2,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, FlatList, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { listPlannedOutfits, planOutfit, ScheduledOutfit, unplanOutfit } from "@/api/calendar";
+import { listPlannedOutfits, planOutfit, renderPlannedOutfit, ScheduledOutfit, unplanOutfit } from "@/api/calendar";
 import { listWardrobeItems } from "@/api/wardrobe";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
@@ -36,6 +36,20 @@ function buildMonthGrid(monthAnchor: Date): (Date | null)[] {
   return days;
 }
 
+/** What a planned day's cell shows: the avatar render if there is one, else a mini collage of the pieces. */
+function DayThumb({ plan }: { plan: ScheduledOutfit }) {
+  if (plan.render_image_url) {
+    return <Image source={{ uri: plan.render_image_url }} style={styles.thumbFill} resizeMode="cover" />;
+  }
+  return (
+    <View style={[styles.thumbFill, styles.collage]}>
+      {plan.items.slice(0, 4).map((item) => (
+        <Image key={item.id} source={{ uri: item.image_url }} style={styles.collageImage} />
+      ))}
+    </View>
+  );
+}
+
 export default function CalendarScreen() {
   const { colors } = useTheme();
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
@@ -46,6 +60,8 @@ export default function CalendarScreen() {
   const [wardrobe, setWardrobe] = useState<ClothingItem[]>([]);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [rendering, setRendering] = useState(false);
+  const [renderError, setRenderError] = useState<string | null>(null);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -78,6 +94,7 @@ export default function CalendarScreen() {
 
   function selectDay(day: string) {
     setSelectedDay(day);
+    setRenderError(null);
     setPicking(false);
   }
 
@@ -103,6 +120,20 @@ export default function CalendarScreen() {
       setPicking(false);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleRender() {
+    if (!selectedDay) return;
+    setRendering(true);
+    setRenderError(null);
+    try {
+      const result = await renderPlannedOutfit(selectedDay);
+      setScheduled((prev) => ({ ...prev, [selectedDay]: result }));
+    } catch (err: any) {
+      setRenderError(err?.response?.data?.detail ?? "Le rendu a échoué — réessaie dans un instant.");
+    } finally {
+      setRendering(false);
     }
   }
 
@@ -146,7 +177,8 @@ export default function CalendarScreen() {
           {days.map((date, i) => {
             if (!date) return <View key={i} style={styles.cell} />;
             const day = toDay(date);
-            const isPlanned = Boolean(scheduled[day]);
+            const plan = scheduled[day];
+            const isPlanned = Boolean(plan);
             const isSelected = selectedDay === day;
             return (
               <Pressable
@@ -158,8 +190,10 @@ export default function CalendarScreen() {
                   { borderColor: isSelected ? colors.primary : "transparent" },
                 ]}
               >
-                <Text style={[styles.dayNumber, { color: colors.text }]}>{date.getDate()}</Text>
-                {isPlanned && <View style={[styles.dot, { backgroundColor: colors.primary }]} />}
+                {plan && <DayThumb plan={plan} />}
+                <Text style={[styles.dayNumber, { color: colors.text }, isPlanned && styles.dayNumberOnThumb]}>
+                  {date.getDate()}
+                </Text>
               </Pressable>
             );
           })}
@@ -172,6 +206,9 @@ export default function CalendarScreen() {
 
           {!picking && detail && detail.items.length > 0 && (
             <>
+              {detail.render_image_url && (
+                <Image source={{ uri: detail.render_image_url }} style={styles.avatarRender} resizeMode="contain" />
+              )}
               <FlatList
                 horizontal
                 data={detail.items}
@@ -182,7 +219,16 @@ export default function CalendarScreen() {
                   <Image source={{ uri: item.image_url }} style={styles.detailImage} />
                 )}
               />
+              {renderError && <Text style={[styles.pickHint, { color: colors.error }]}>{renderError}</Text>}
               <View style={styles.detailActions}>
+                {!detail.render_image_url && (
+                  <Button
+                    title={rendering ? "Rendu en cours… (~1 min)" : "✦ Voir sur mon avatar"}
+                    variant="small"
+                    onPress={handleRender}
+                    loading={rendering}
+                  />
+                )}
                 <Button title="Change outfit" variant="small" onPress={startPicking} />
                 <Button title="Remove" variant="ghost" onPress={handleUnplan} />
               </View>
@@ -238,9 +284,23 @@ const styles = StyleSheet.create({
   spinner: { marginTop: spacing.xl },
   grid: { flexDirection: "row", flexWrap: "wrap" },
   cell: { width: "14.28%", aspectRatio: 1, alignItems: "center", justifyContent: "center" },
-  dayCell: { borderWidth: 1.5, borderRadius: radius.sm },
+  dayCell: { borderWidth: 1.5, borderRadius: radius.sm, overflow: "hidden" },
   dayNumber: { fontSize: 14 },
-  dot: { width: 5, height: 5, borderRadius: 3, marginTop: 2 },
+  dayNumberOnThumb: {
+    position: "absolute",
+    top: 1,
+    left: 2,
+    paddingHorizontal: 3,
+    borderRadius: 6,
+    fontSize: 10,
+    fontWeight: "700",
+    backgroundColor: "rgba(255,255,255,0.85)",
+    overflow: "hidden",
+  },
+  thumbFill: { ...StyleSheet.absoluteFillObject },
+  collage: { flexDirection: "row", flexWrap: "wrap", backgroundColor: "#F1ECEB" },
+  collageImage: { width: "50%", height: "50%" },
+  avatarRender: { width: "100%", height: 360, borderRadius: radius.md, backgroundColor: "#FAF7F5" },
   detailCard: { padding: spacing.lg, gap: spacing.sm },
   detailTitle: { fontSize: 15, fontWeight: "700" },
   detailItems: { gap: spacing.sm },

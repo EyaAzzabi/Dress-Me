@@ -7,6 +7,7 @@ from app.core.config import Settings
 def _agent_with_settings(monkeypatch, **overrides) -> TryOnAgent:
     # Both default to unset here regardless of the real .env (which has them set for
     # local dev/testing) — tests opt in to a configured agent explicitly instead.
+    overrides.setdefault("tryon_provider", "replicate")
     overrides.setdefault("replicate_api_token", None)
     overrides.setdefault("replicate_tryon_model_version", None)
     settings = Settings(**overrides)
@@ -97,3 +98,66 @@ def test_failed_generation_raises(monkeypatch):
 
     with pytest.raises(RuntimeError, match="bad input"):
         agent.run(person_image_url="https://x/person.jpg", garment_image_url="https://x/garment.jpg")
+
+
+def test_auto_provider_prefers_replicate_only_when_its_credentials_exist(monkeypatch):
+    free = _agent_with_settings(monkeypatch, tryon_provider="auto")
+    paid = _agent_with_settings(
+        monkeypatch, tryon_provider="auto", replicate_api_token="r8_x", replicate_tryon_model_version="v1"
+    )
+
+    assert free.provider == "huggingface"
+    assert paid.provider == "replicate"
+
+
+def test_huggingface_chain_dresses_garments_in_order_and_stores_the_result(monkeypatch, tmp_path):
+    agent = _agent_with_settings(monkeypatch, tryon_provider="huggingface", local_storage_dir=str(tmp_path))
+    calls = []
+
+    class _Job:
+        def __init__(self, out):
+            self.out = out
+
+        def result(self, timeout=None):
+            return [{"image": self.out, "caption": None}]
+
+    class _Client:
+        def __init__(self, space, hf_token=None, verbose=False):
+            assert space == "levihsu/OOTDiffusion"
+
+        def submit(self, person, garment, category, *rest, api_name):
+            calls.append((person, garment, category, api_name))
+            out = tmp_path / f"step{len(calls)}.png"
+            out.write_bytes(b"png-bytes")
+            return _Job(str(out))
+
+    import gradio_client
+
+    monkeypatch.setattr(gradio_client, "Client", _Client)
+    monkeypatch.setattr(gradio_client, "handle_file", lambda path: f"file:{path}")
+
+    result = agent.run_outfit(
+        person_image_url="https://x/avatar.jpg",
+        garments=[("https://x/pants.jpg", "lower_body"), ("https://x/top.jpg", "upper_body")],
+    )
+
+    assert [c[2] for c in calls] == ["Lower-body", "Upper-body"]
+    assert calls[0][0] == "file:https://x/avatar.jpg"
+    assert calls[1][0].startswith("file:") and calls[1][0].endswith("step1.png")  # chained on the previous result
+    assert all(c[3] == "/process_dc" for c in calls)
+    assert result["persisted"] is True and "/media/" in result["result_image_url"]
+
+
+def test_huggingface_failure_becomes_a_runtime_error_with_quota_advice(monkeypatch, tmp_path):
+    agent = _agent_with_settings(monkeypatch, tryon_provider="huggingface", local_storage_dir=str(tmp_path))
+
+    class _Client:
+        def __init__(self, *a, **k):
+            raise ValueError("You have exceeded your GPU quota")
+
+    import gradio_client
+
+    monkeypatch.setattr(gradio_client, "Client", _Client)
+
+    with pytest.raises(RuntimeError, match="HF_TOKEN"):
+        agent.run_outfit(person_image_url="https://x/a.jpg", garments=[("https://x/g.jpg", "upper_body")])

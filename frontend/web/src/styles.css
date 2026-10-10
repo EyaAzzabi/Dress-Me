@@ -662,3 +662,27 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+.season-picker { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin: 0 0 9px; }
+.season-picker select { max-width: 100%; padding: 3px 4px; border: 1px solid #ead7de; border-radius: 8px; background: #fff; color: var(--navy); font-size: 9px; font-weight: 700; }
+.confirm-badge { padding: 2px 6px; border-radius: 999px; background: #c9984a; color: #fff; font-size: 8px; font-weight: 800; }
+
+.usage-line { min-height: 0; margin: 0 0 7px; color: #8b8795; font-size: 9px; }
+.worn-button { margin-left: 4px; padding: 2px 6px; border: 1px solid #ead7de; border-radius: 999px; background: #fff; color: var(--navy); cursor: pointer; font-size: 8px; font-weight: 700; }
+.worn-button:hover { background: #fff1f5; }
+.results-line .confirm-badge { margin-left: 8px; }
+
+.calendar-day.has-outfit { overflow: hidden; padding: 0; }
+.calendar-day .day-thumb, .calendar-day .day-collage { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: inherit; }
+.calendar-day .day-thumb { object-fit: cover; object-position: top; }
+.calendar-day .day-collage { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #f1eceb; }
+.calendar-day .day-collage img { width: 100%; height: 100%; object-fit: cover; }
+.calendar-day.has-outfit > span { position: absolute; top: 2px; left: 2px; z-index: 1; min-width: 14px; padding: 0 3px; border-radius: 7px; background: rgba(255,255,255,.85); font-size: 9px; line-height: 14px; }
+.calendar-day.has-outfit.is-today > span { width: auto; height: auto; background: rgba(245,217,227,.95); }
+.avatar-render { display: block; width: 100%; max-height: 420px; margin-bottom: 12px; border-radius: 14px; object-fit: contain; background: #faf7f5; }
+
+.category-prompt { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 14px; border: 1px solid #e8c98f; background: #fffaf0; }
+.category-prompt img { width: 88px; height: 110px; flex: none; border-radius: 10px; object-fit: cover; }
+.category-prompt h3 { margin: 2px 0 4px; }
+.category-prompt p { margin: 0 0 10px; color: #6f6a78; font-size: 12px; line-height: 1.5; }
+.category-prompt select { padding: 6px 8px; border: 1px solid #ead7de; border-radius: 10px; background: #fff; }

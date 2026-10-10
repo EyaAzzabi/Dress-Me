@@ -40,9 +40,12 @@ def test_run_returns_structured_attributes(monkeypatch):
     assert result["category"] in {
         "haut", "bas", "robe", "veste", "chaussures", "sac", "accessoire", "hors_perimetre",
     }
-    assert isinstance(result["colors"], list) and len(result["colors"]) == 1
-    assert isinstance(result["pattern"], str)
-    assert isinstance(result["style"], str)
+    assert isinstance(result["colors"], list) and 1 <= len(result["colors"]) <= 3
+    assert result["pattern"] is None or isinstance(result["pattern"], str)
+    assert result["style"] is None or isinstance(result["style"], str)
+    assert result["season"] in {None, "ete", "hiver", "mi_saison"}
+    assert set(result["confidence"]) == {"category", "colors", "pattern", "style", "season"}
+    assert all(0.0 <= v <= 1.0 for v in result["confidence"].values())
     # VisionAgent only analyzes — persistence (Pinecone upsert) is the caller's job
     # (see app/api/routes/wardrobe.py), so the raw embedding is returned, not an id.
     assert result["embedding"].shape == (512,)

@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -70,14 +71,15 @@ def test_non_clothing_photos_are_not_saved(db, evaluate):
     assert client.get("/api/v1/purchase/history").json() == []
 
 
-def test_history_is_private_and_newest_first(db, evaluate):
+def test_history_is_private_and_newest_first(db):
     other = db.users[1]
     db.add(PurchaseHistoryEntry(owner_id=other.id, image_url="http://x/theirs.jpg", category="bas",
                                 verdict="recommended", score=80, result=_result("bas")))
+    for minute, name in [(0, "first"), (1, "second")]:
+        db.add(PurchaseHistoryEntry(owner_id=db.users[0].id, image_url=f"http://x/{name}.jpg", category="haut",
+                                    verdict="recommended", score=72, result=_result(),
+                                    created_at=datetime(2026, 10, 10, 12, minute, tzinfo=timezone.utc)))
     db.commit()
-    for name in ["first", "second"]:
-        evaluate(_result())
-        client.post("/api/v1/purchase/check", json={"image_url": f"http://x/{name}.jpg"})
 
     urls = [h["image_url"] for h in client.get("/api/v1/purchase/history").json()]
 

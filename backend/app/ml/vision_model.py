@@ -10,6 +10,13 @@ is a separate research/data-pipeline folder not included in that build context.
   photos, vs. 62% / 0.55 for zero-shot).
 - `color` / `pattern` / `style`: zero-shot classification (no labeled training data exists
   for these), same prompts as ml/src/features.py.
+- `season`: zero-shot too, but only a *suggestion* (fabric weight isn't reliably visible in
+  one photo) — callers should prefer a user-provided season and only fall back to it when
+  the model was confident (see SEASON_MIN_CONFIDENCE).
+- Every attribute comes with a confidence (softmax probability of the winning label).
+  `pattern`/`style`/`season` come back as None below their minimum confidence rather than
+  storing a near-random guess; `colors` lists up to MAX_COLORS labels above
+  COLOR_SECONDARY_MIN_PROB.
 - The raw embedding is also returned for similarity search (Purchase Agent / Pinecone).
 """
 
@@ -45,6 +52,28 @@ PATTERN_PROMPTS = {
     "brode": "an embroidered garment with decorative stitching",
     "geometrique": "a garment with a geometric or abstract print",
 }
+
+
+SEASON_PROMPTS = {
+    "ete": "a lightweight summer garment",
+    "hiver": "a warm heavy winter garment",
+    "mi_saison": "a medium-weight spring or autumn garment",
+}
+
+# Below this the category is more guess than reading — typically a photo of several pieces
+# at once (a full outfit), which the classifier wasn't trained on (it saw one item per photo).
+# Measured on the 1,380 held-out Tunisian test photos (catalog-style, one item each; the
+# classifier is 83.7% accurate on in-scope garments there): at 0.50 it holds back 6.7% of
+# the correct predictions and catches 50.8% of the wrong ones, lifting the accuracy of what
+# gets through to 90.7%. (0.40: 2.4% / 22.5% / 86.6%; 0.60: 15.4% / 69.2% / 93.4%.) Users can
+# confirm a held-back category in one tap, so the false alarms are cheap. Real phone photos
+# may score differently than catalog shots — revisit with real uploads.
+CATEGORY_MIN_CONFIDENCE = 0.50
+MAX_COLORS = 3
+COLOR_SECONDARY_MIN_PROB = 0.25
+PATTERN_MIN_CONFIDENCE = 0.30  # weak labels: below this, report no pattern
+STYLE_MIN_CONFIDENCE = 0.25
+SEASON_MIN_CONFIDENCE = 0.50  # below this, don't suggest a season at all
 
 
 def _get_device() -> str:
@@ -113,7 +142,7 @@ def _prompt_text_vectors(prompts: tuple[tuple[str, str], ...], template: str) ->
     return _embed_texts(texts)
 
 
-def _zero_shot(embedding: np.ndarray, prompts: dict[str, str], template: str) -> str:
+def _zero_shot_probs(embedding: np.ndarray, prompts: dict[str, str], template: str) -> dict[str, float]:
     model, _, _ = _load_fashionclip()
     items = tuple(prompts.items())
     text_vectors = _prompt_text_vectors(items, template)
@@ -121,35 +150,74 @@ def _zero_shot(embedding: np.ndarray, prompts: dict[str, str], template: str) ->
     logits = scale * embedding @ text_vectors.T
     probs = np.exp(logits - logits.max())
     probs /= probs.sum()
-    best = int(probs.argmax())
-    return list(prompts)[best]
+    return dict(zip(prompts, (float(p) for p in probs)))
 
 
-def predict_category(embedding: np.ndarray) -> str:
+def _top(probs: dict[str, float]) -> tuple[str, float]:
+    label = max(probs, key=probs.get)
+    return label, probs[label]
+
+
+def predict_category(embedding: np.ndarray) -> tuple[str, float]:
     clf = _load_category_classifier()
-    return clf.predict(embedding.reshape(1, -1))[0]
+    x = embedding.reshape(1, -1)
+    label = clf.predict(x)[0]
+    # A linear probe normally exposes predict_proba; if it doesn't, report full
+    # confidence rather than inventing a number.
+    confidence = float(clf.predict_proba(x).max()) if hasattr(clf, "predict_proba") else 1.0
+    return label, confidence
 
 
-def predict_color(embedding: np.ndarray) -> str:
-    return _zero_shot(embedding, COLOR_PROMPTS, template="a photo of a {} item of clothing")
+def predict_colors(embedding: np.ndarray) -> tuple[list[str], float]:
+    """Dominant color first, plus up to MAX_COLORS-1 more that are clearly present."""
+    probs = _zero_shot_probs(embedding, COLOR_PROMPTS, template="a photo of a {} item of clothing")
+    ranked = sorted(probs.items(), key=lambda kv: kv[1], reverse=True)
+    colors = [ranked[0][0]] + [
+        label for label, p in ranked[1:MAX_COLORS] if p >= COLOR_SECONDARY_MIN_PROB
+    ]
+    return colors, ranked[0][1]
 
 
-def predict_pattern(embedding: np.ndarray) -> str:
-    return _zero_shot(embedding, PATTERN_PROMPTS, template="{}")
+def predict_pattern(embedding: np.ndarray) -> tuple[str | None, float]:
+    label, confidence = _top(_zero_shot_probs(embedding, PATTERN_PROMPTS, template="{}"))
+    return (label if confidence >= PATTERN_MIN_CONFIDENCE else None), confidence
 
 
-def predict_style(embedding: np.ndarray) -> str:
-    return _zero_shot(embedding, STYLE_PROMPTS, template="a photo of a {} item of clothing")
+def predict_style(embedding: np.ndarray) -> tuple[str | None, float]:
+    label, confidence = _top(
+        _zero_shot_probs(embedding, STYLE_PROMPTS, template="a photo of a {} item of clothing")
+    )
+    return (label if confidence >= STYLE_MIN_CONFIDENCE else None), confidence
+
+
+def predict_season(embedding: np.ndarray) -> tuple[str | None, float]:
+    label, confidence = _top(_zero_shot_probs(embedding, SEASON_PROMPTS, template="{}"))
+    return (label if confidence >= SEASON_MIN_CONFIDENCE else None), confidence
 
 
 def analyze_image(image_bytes: bytes) -> dict:
-    """Runs the full Vision Agent pipeline on one image: category, color, pattern,
-    style, and the raw embedding (for similarity search / Pinecone storage)."""
+    """Runs the full Vision Agent pipeline on one image: category, colors, pattern,
+    style, a suggested season, per-attribute confidence, and the raw embedding (for
+    similarity search / Pinecone storage)."""
     embedding = embed_image_bytes(image_bytes)
+    category, category_conf = predict_category(embedding)
+    colors, color_conf = predict_colors(embedding)
+    pattern, pattern_conf = predict_pattern(embedding)
+    style, style_conf = predict_style(embedding)
+    season, season_conf = predict_season(embedding)
     return {
-        "category": predict_category(embedding),
-        "colors": [predict_color(embedding)],
-        "pattern": predict_pattern(embedding),
-        "style": predict_style(embedding),
+        "category": category,
+        "colors": colors,
+        "pattern": pattern,
+        "style": style,
+        "season": season,
+        "category_uncertain": category_conf < CATEGORY_MIN_CONFIDENCE,
+        "confidence": {
+            "category": round(category_conf, 3),
+            "colors": round(color_conf, 3),
+            "pattern": round(pattern_conf, 3),
+            "style": round(style_conf, 3),
+            "season": round(season_conf, 3),
+        },
         "embedding": embedding,
     }

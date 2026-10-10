@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.agents.packing_agent import PackingAgent
+from app.agents.orchestrator import AgentOrchestrator
 from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.clothing_item import ClothingItem
@@ -12,7 +12,6 @@ from app.models.user import User
 from app.schemas.packing import PackingItemCheck, PackingListCreate, PackingListRead
 
 router = APIRouter(prefix="/packing", tags=["packing"])
-packing_agent = PackingAgent()
 
 
 def _resolve(packing_list: PackingList, db: Session) -> dict:
@@ -26,6 +25,8 @@ def _resolve(packing_list: PackingList, db: Session) -> dict:
         "destination": packing_list.destination,
         "duration_days": packing_list.duration_days,
         "trip_type": packing_list.trip_type,
+        "start_date": packing_list.start_date,
+        "season": packing_list.season,
         "item_ids": packing_list.item_ids,
         "checked_item_ids": packing_list.checked_item_ids,
         "items": items,
@@ -41,24 +42,13 @@ def create_packing_list(
     if payload.duration_days < 1:
         raise HTTPException(status_code=422, detail="duration_days must be at least 1.")
 
-    wardrobe_items = db.query(ClothingItem).filter(ClothingItem.owner_id == current_user.id).all()
-    generated = packing_agent.run(
-        wardrobe_items=wardrobe_items,
-        duration_days=payload.duration_days,
-        trip_type=payload.trip_type,
-    )
-
-    packing_list = PackingList(
-        owner_id=current_user.id,
+    packing_list = AgentOrchestrator(db).plan_trip(
+        user_id=current_user.id,
         destination=payload.destination,
         duration_days=payload.duration_days,
         trip_type=payload.trip_type,
-        item_ids=generated["item_ids"],
-        checked_item_ids=[],
+        start_date=payload.start_date,
     )
-    db.add(packing_list)
-    db.commit()
-    db.refresh(packing_list)
     return _resolve(packing_list, db)
 
 

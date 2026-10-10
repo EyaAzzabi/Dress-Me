@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -20,13 +21,18 @@ import { platformShadow } from "@/utils/platformStyles";
 import {
   addWardrobeItem,
   listWardrobeItems,
+  listWardrobeUsage,
+  LowCategoryConfidence,
+  parseLowCategoryConfidence,
+  markItemWorn,
   removeWardrobeItem,
+  updateWardrobeItem,
   uploadPhoto,
 } from "@/api/wardrobe";
 import { TunisianHeader } from "@/components/TunisianHeader";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius, spacing } from "@/theme/tokens";
-import { ClothingItem } from "@/types/models";
+import { ClothingItem, ItemUsage, Season } from "@/types/models";
 import { notify } from "@/utils/notify";
 
 const FAVORITES_STORAGE_KEY = "dressme_wardrobe_favorites";
@@ -42,9 +48,43 @@ const CAT_ICON: Record<string, string> = {
   uncategorized: "🪡",
 };
 
+const CATEGORY_OPTIONS = [
+  { value: "haut", label: "Haut" },
+  { value: "bas", label: "Bas" },
+  { value: "robe", label: "Robe" },
+  { value: "veste", label: "Veste" },
+  { value: "chaussures", label: "Chaussures" },
+  { value: "sac", label: "Sac" },
+  { value: "accessoire", label: "Accessoire" },
+];
+
+interface CategoryPrompt extends LowCategoryConfidence {
+  imageUrl: string;
+}
+
+const SEASON_OPTIONS: { value: Season; label: string; icon: string }[] = [
+  { value: "ete", label: "Été", icon: "☀️" },
+  { value: "hiver", label: "Hiver", icon: "❄️" },
+  { value: "mi_saison", label: "Mi-saison", icon: "🍂" },
+  { value: "toutes_saisons", label: "Toutes saisons", icon: "🌍" },
+];
+
+function seasonLabel(season: string | null | undefined): string | null {
+  const option = SEASON_OPTIONS.find((o) => o.value === season);
+  return option ? `${option.icon} ${option.label}` : null;
+}
+
+/** The season is a model guess (or missing) — the owner hasn't confirmed it yet. */
+function needsSeasonConfirmation(item: ClothingItem): boolean {
+  return item.season_source === "vision" || !item.season;
+}
+
 function getErrorMessage(error: unknown): string {
   if (isAxiosError(error) && typeof error.response?.data?.detail === "string") {
     return error.response.data.detail;
+  }
+  if (isAxiosError(error) && typeof error.response?.data?.detail?.message === "string") {
+    return error.response.data.detail.message;
   }
   return "Une erreur est survenue. Réessaie dans un instant.";
 }
@@ -83,6 +123,9 @@ export default function WardrobeScreen() {
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [seasonTarget, setSeasonTarget] = useState<ClothingItem | null>(null);
+  const [usage, setUsage] = useState<Record<string, ItemUsage>>({});
+  const [categoryPrompt, setCategoryPrompt] = useState<CategoryPrompt | null>(null);
 
   const reload = useCallback(async () => {
     const nextItems = await listWardrobeItems();
@@ -96,9 +139,12 @@ export default function WardrobeScreen() {
     Promise.all([
       listWardrobeItems(),
       AsyncStorage.getItem(FAVORITES_STORAGE_KEY).then(readFavorites),
+      // Usage is a nicety — the wardrobe must still load without it.
+      listWardrobeUsage().catch(() => [] as ItemUsage[]),
     ])
-      .then(([nextItems, storedFavorites]) => {
+      .then(([nextItems, storedFavorites, usageEntries]) => {
         if (!active) return;
+        setUsage(Object.fromEntries(usageEntries.map((entry) => [entry.item_id, entry])));
         const validIds = new Set(nextItems.map((item) => item.id));
         const nextFavorites = storedFavorites.filter((id) => validIds.has(id));
         setItems(nextItems);
@@ -118,6 +164,34 @@ export default function WardrobeScreen() {
     };
   }, []));
 
+  /** Adds the photo; if the model isn't sure of its category (often several pieces at once), asks the owner instead of saving a likely-wrong one. */
+  async function submitNewItem(imageUrl: string, category?: string) {
+    try {
+      await addWardrobeItem(imageUrl, undefined, category);
+    } catch (error: unknown) {
+      const unsure = parseLowCategoryConfidence(error);
+      if (!unsure) throw error;
+      setCategoryPrompt({ ...unsure, imageUrl });
+      return;
+    }
+    await reload();
+    notify("Pièce ajoutée", "Ta nouvelle pièce est dans ton dressing.");
+  }
+
+  async function confirmCategory(category: string) {
+    if (!categoryPrompt) return;
+    const { imageUrl } = categoryPrompt;
+    setCategoryPrompt(null);
+    setAdding(true);
+    try {
+      await submitNewItem(imageUrl, category);
+    } catch (error: unknown) {
+      notify("Impossible d'ajouter", getErrorMessage(error));
+    } finally {
+      setAdding(false);
+    }
+  }
+
   async function handleAdd() {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -128,9 +202,7 @@ export default function WardrobeScreen() {
       const picture = await ImagePicker.launchImageLibraryAsync({ quality: 0.85 });
       if (picture.canceled) return;
       setAdding(true);
-      await addWardrobeItem(await uploadPhoto(picture.assets[0].uri));
-      await reload();
-      notify("Pièce ajoutée", "Ta nouvelle pièce est dans ton dressing.");
+      await submitNewItem(await uploadPhoto(picture.assets[0].uri));
     } catch (error: unknown) {
       notify("Impossible d'ajouter", getErrorMessage(error));
     } finally {
@@ -147,6 +219,25 @@ export default function WardrobeScreen() {
       setFavorites(nextFavorites);
     } catch (error: unknown) {
       notify("Favori non enregistré", getErrorMessage(error));
+    }
+  }
+
+  async function wearToday(item: ClothingItem) {
+    try {
+      const entry = await markItemWorn(item.id);
+      setUsage((current) => ({ ...current, [entry.item_id]: entry }));
+    } catch (error: unknown) {
+      notify("Impossible d'enregistrer", getErrorMessage(error));
+    }
+  }
+
+  async function chooseSeason(item: ClothingItem, season: Season) {
+    setSeasonTarget(null);
+    try {
+      const updated = await updateWardrobeItem(item.id, { season });
+      setItems((current) => current.map((i) => (i.id === updated.id ? updated : i)));
+    } catch (error: unknown) {
+      notify("Saison non enregistrée", getErrorMessage(error));
     }
   }
 
@@ -196,6 +287,7 @@ export default function WardrobeScreen() {
         category,
         item.style ?? "",
         item.season ?? "",
+        seasonLabel(item.season) ?? "",
         ...(item.colors ?? []),
       ].join(" ").toLocaleLowerCase();
       return (!selectedCategory || category === selectedCategory)
@@ -203,6 +295,8 @@ export default function WardrobeScreen() {
         && (!normalizedQuery || searchable.includes(normalizedQuery));
     });
   }, [favorites, favoritesOnly, items, query, selectedCategory]);
+
+  const toConfirmCount = useMemo(() => items.filter(needsSeasonConfirmation).length, [items]);
 
   const groups = useMemo(() => groupByCategory(filteredItems), [filteredItems]);
 
@@ -334,6 +428,7 @@ export default function WardrobeScreen() {
           <>
             <Text style={[styles.resultCount, { color: colors.textMuted }]}>
               {filteredItems.length} pièce{filteredItems.length !== 1 ? "s" : ""} affichée{filteredItems.length !== 1 ? "s" : ""}
+              {toConfirmCount > 0 ? ` · ${toConfirmCount} saison${toConfirmCount !== 1 ? "s" : ""} à confirmer` : ""}
             </Text>
             {groups.map(([category, categoryItems]) => (
               <View key={category} style={styles.section}>
@@ -403,8 +498,36 @@ export default function WardrobeScreen() {
                             {categoryLabel(category)}
                           </Text>
                           <Text style={[styles.itemDetails, { color: colors.textMuted }]} numberOfLines={1}>
-                            {[item.colors?.join(", "), item.season, item.style].filter(Boolean).join(" · ") || "Ajoutée à ton dressing"}
+                            {[item.colors?.join(", "), item.style].filter(Boolean).join(" · ") || "Ajoutée à ton dressing"}
                           </Text>
+                          <Pressable
+                            onPress={() => setSeasonTarget(item)}
+                            disabled={isRemoving}
+                            accessibilityRole="button"
+                            accessibilityLabel="Choisir la saison de cette pièce"
+                            style={styles.seasonRow}
+                          >
+                            <Text style={[styles.seasonText, { color: colors.text }]} numberOfLines={1}>
+                              {seasonLabel(item.season) ?? "Saison ?"}
+                            </Text>
+                            {needsSeasonConfirmation(item) && (
+                              <View style={[styles.confirmBadge, { backgroundColor: colors.tunisianGold }]}>
+                                <Text style={styles.confirmBadgeTxt}>À confirmer</Text>
+                              </View>
+                            )}
+                          </Pressable>
+                          <Pressable
+                            onPress={() => void wearToday(item)}
+                            disabled={isRemoving}
+                            accessibilityRole="button"
+                            accessibilityLabel="Marquer cette pièce comme portée aujourd'hui"
+                            style={styles.wornRow}
+                          >
+                            <Text style={[styles.wornText, { color: colors.textMuted }]} numberOfLines={1}>
+                              {usage[item.id] ? `Portée ${usage[item.id].wear_count}×` : "Jamais portée"}
+                            </Text>
+                            <Text style={[styles.wornAction, { color: colors.primary }]}>Je l'ai portée</Text>
+                          </Pressable>
                         </View>
                       </View>
                     );
@@ -415,6 +538,87 @@ export default function WardrobeScreen() {
           </>
         )}
       </ScrollView>
+
+      <Modal visible={categoryPrompt !== null} transparent animationType="fade" onRequestClose={() => setCategoryPrompt(null)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setCategoryPrompt(null)}>
+          <Pressable style={[styles.modalSheet, { backgroundColor: colors.surfaceElevated }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Quelle est cette pièce ?</Text>
+            {categoryPrompt && (
+              <>
+                <Image source={{ uri: categoryPrompt.imageUrl }} style={styles.promptImage} resizeMode="contain" />
+                <Text style={[styles.modalHint, { color: colors.textMuted }]}>
+                  {categoryPrompt.message} (DressMe hésite : « {categoryLabel(categoryPrompt.suggested_category)} », sûr à{" "}
+                  {Math.round(categoryPrompt.confidence * 100)} %.)
+                </Text>
+              </>
+            )}
+            {CATEGORY_OPTIONS.map((option) => {
+              const suggested = categoryPrompt?.suggested_category === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  onPress={() => void confirmCategory(option.value)}
+                  accessibilityRole="button"
+                  style={[
+                    styles.modalOption,
+                    {
+                      backgroundColor: suggested ? colors.pillActiveBg : colors.surface,
+                      borderColor: suggested ? colors.pillActiveBg : colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.modalOptionTxt, { color: suggested ? colors.pillActiveText : colors.text }]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+            <Pressable onPress={() => setCategoryPrompt(null)} accessibilityRole="button" style={styles.modalOption}>
+              <Text style={[styles.modalOptionTxt, { color: colors.textMuted }]}>Annuler</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={seasonTarget !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSeasonTarget(null)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setSeasonTarget(null)}>
+          <Pressable style={[styles.modalSheet, { backgroundColor: colors.surfaceElevated }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Pour quelle saison ?</Text>
+            {seasonTarget?.season_source === "vision" && seasonTarget.season && (
+              <Text style={[styles.modalHint, { color: colors.textMuted }]}>
+                DressMe suggère {seasonLabel(seasonTarget.season)} — confirme ou change.
+              </Text>
+            )}
+            {SEASON_OPTIONS.map((option) => {
+              const selected = seasonTarget?.season === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  onPress={() => seasonTarget && void chooseSeason(seasonTarget, option.value)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  style={[
+                    styles.modalOption,
+                    {
+                      backgroundColor: selected ? colors.pillActiveBg : colors.surface,
+                      borderColor: selected ? colors.pillActiveBg : colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.modalOptionTxt, { color: selected ? colors.pillActiveText : colors.text }]}>
+                    {option.icon}  {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -553,6 +757,26 @@ const styles = StyleSheet.create({
   itemMeta: { paddingHorizontal: 11, paddingVertical: 10, gap: 4 },
   itemCategory: { fontSize: 12, fontWeight: "800" },
   itemDetails: { fontSize: 10 },
+  wornRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6, marginTop: 4 },
+  wornText: { fontSize: 10 },
+  wornAction: { fontSize: 10, fontWeight: "800" },
+  seasonRow: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 2 },
+  seasonText: { fontSize: 11, fontWeight: "700" },
+  confirmBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: radius.pill },
+  confirmBadgeTxt: { color: "#FFF", fontSize: 9, fontWeight: "800" },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: spacing.xl,
+  },
+  modalSheet: { width: "100%", maxWidth: 360, borderRadius: radius.xl, padding: spacing.xl, gap: spacing.sm },
+  modalTitle: { fontSize: 17, fontWeight: "800" },
+  promptImage: { width: "100%", height: 160, borderRadius: radius.md, backgroundColor: "#FAF7F5" },
+  modalHint: { fontSize: 12, marginBottom: spacing.xs },
+  modalOption: { minHeight: 46, justifyContent: "center", paddingHorizontal: 14, borderWidth: 1, borderRadius: radius.md },
+  modalOptionTxt: { fontSize: 14, fontWeight: "700" },
   iconButton: {
     position: "absolute",
     zIndex: 1,

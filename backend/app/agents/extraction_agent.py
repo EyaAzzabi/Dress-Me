@@ -4,7 +4,7 @@ import httpx
 import numpy as np
 
 from app.agents.base import BaseAgent
-from app.ml import garment_segmentation, vision_model
+from app.ml import clothing_gate, garment_segmentation, vision_model
 from app.services.storage import StorageService
 
 # The segmentation's "upper clothes" covers tops and jackets alike: the category
@@ -35,11 +35,14 @@ class ExtractionAgent(BaseAgent):
 
         if not segmentation.person_detected or not segmentation.garments:
             embedding = vision_model.embed_image_bytes(response.content)
+            category = vision_model.predict_category(embedding)[0]
+            if not clothing_gate.is_clothing(embedding):
+                category = "hors_perimetre"
             return {
                 "person_detected": segmentation.person_detected,
                 "garments": [{
-                    "category": vision_model.predict_category(embedding),
-                    "color": vision_model.predict_color(embedding),
+                    "category": category,
+                    "color": _main_color(embedding),
                     "image_url": image_url,
                     "share": 1.0,
                 }],
@@ -54,11 +57,16 @@ class ExtractionAgent(BaseAgent):
                 category = _upper_body_category(embedding)
             garments.append({
                 "category": category,
-                "color": vision_model.predict_color(embedding),
+                "color": _main_color(embedding),
                 "image_url": self.storage.upload_image(content, "image/jpeg"),
                 "share": garment.share,
             })
         return {"person_detected": True, "garments": garments}
+
+
+def _main_color(embedding: np.ndarray) -> str | None:
+    colors, _ = vision_model.predict_colors(embedding)
+    return colors[0] if colors else None
 
 
 def _upper_body_category(embedding: np.ndarray) -> str:

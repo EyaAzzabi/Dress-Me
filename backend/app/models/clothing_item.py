@@ -2,7 +2,7 @@ import json
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator, Uuid
 
@@ -38,6 +38,10 @@ class ClothingItem(Base):
     style: Mapped[str | None] = mapped_column(String(100))  # casual, formal, sport, ...
     season: Mapped[str | None] = mapped_column(String(50))
     pattern: Mapped[str | None] = mapped_column(String(100))
+    # 'user' if the owner chose/corrected the season, 'vision' if it's the model's suggestion.
+    season_source: Mapped[str | None] = mapped_column(String(20))
+    # Vision Agent probabilities per attribute at upload time, e.g. {"category": 0.93, ...}.
+    attribute_confidence: Mapped[dict | None] = mapped_column(JSON)
     embedding_id: Mapped[str | None] = mapped_column(String(64))  # id in the Pinecone vector store
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

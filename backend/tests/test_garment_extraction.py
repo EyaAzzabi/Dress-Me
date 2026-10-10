@@ -6,7 +6,7 @@ from PIL import Image
 
 from app.agents import extraction_agent
 from app.agents.extraction_agent import ExtractionAgent
-from app.ml import garment_segmentation, vision_model
+from app.ml import clothing_gate, garment_segmentation, vision_model
 from app.ml.garment_segmentation import Garment, Segmentation
 
 HAIR, FACE, TOP, PANTS, DRESS, BELT, SCARF, BAG, LEFT_SHOE, RIGHT_SHOE = 2, 11, 4, 6, 7, 8, 17, 16, 9, 10
@@ -109,8 +109,9 @@ class _FakeResponse:
 def agent(monkeypatch):
     monkeypatch.setattr(extraction_agent.httpx, "get", lambda *a, **k: _FakeResponse())
     monkeypatch.setattr(vision_model, "embed_image_bytes", lambda content: np.zeros(512))
-    monkeypatch.setattr(vision_model, "predict_color", lambda embedding: "noir")
-    monkeypatch.setattr(vision_model, "predict_category", lambda embedding: "haut")
+    monkeypatch.setattr(vision_model, "predict_colors", lambda embedding: (["noir"], 0.9))
+    monkeypatch.setattr(vision_model, "predict_category", lambda embedding: ("haut", 0.9))
+    monkeypatch.setattr(clothing_gate, "is_clothing", lambda embedding: True)
     agent = ExtractionAgent.__new__(ExtractionAgent)
     agent.storage = _FakeStorage()
     return agent

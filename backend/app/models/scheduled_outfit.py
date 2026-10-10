@@ -3,7 +3,7 @@ import uuid
 from datetime import date as date_type
 from datetime import datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Text, UniqueConstraint, func
+from sqlalchemy import Date, DateTime, ForeignKey, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator, Uuid
 
@@ -42,6 +42,12 @@ class ScheduledOutfit(Base):
 
     date: Mapped[date_type] = mapped_column(Date, nullable=False)
     item_ids: Mapped[list[uuid.UUID]] = mapped_column(JSONUUIDList, nullable=False)
+
+    # "My avatar wearing this outfit" — a virtual try-on render, stored in our own
+    # storage (Replicate's URLs expire). render_signature is a hash of the items + the
+    # avatar photo it was made from; when either changes the render is stale and hidden.
+    render_image_url: Mapped[str | None] = mapped_column(String(1024))
+    render_signature: Mapped[str | None] = mapped_column(String(64))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
