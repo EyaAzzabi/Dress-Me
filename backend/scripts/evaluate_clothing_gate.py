@@ -6,7 +6,7 @@
   saw: its hors_perimetre class was only trained on non-clothing catalog products.
 
 Reports, for the current classifier alone and combined with the zero-shot gate in
-app/ml/vision_model.py at several thresholds, the share of clothing wrongly rejected
+app/ml/clothing_gate.py at several thresholds, the share of clothing wrongly rejected
 and of non-clothing wrongly accepted.
 
 Usage (from backend/):  python -m scripts.evaluate_clothing_gate
@@ -22,7 +22,7 @@ import numpy as np
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
-from app.ml import vision_model  # noqa: E402
+from app.ml import clothing_gate, vision_model  # noqa: E402
 from app.services.catalog_index import _load_index  # noqa: E402
 
 OOD_CACHE = Path(__file__).resolve().parent / ".ood_picsum.npy"
@@ -60,8 +60,8 @@ def main() -> None:
     def classifier_rejects(vectors):
         return classifier.predict(vectors) == "hors_perimetre"
 
-    p_clothing = vision_model.clothing_probability(clothing)
-    p_non_clothing = vision_model.clothing_probability(non_clothing)
+    p_clothing = clothing_gate.clothing_probability(clothing)
+    p_non_clothing = clothing_gate.clothing_probability(non_clothing)
 
     print(f"{'rule':<40}{'clothing rejected':>20}{'non-clothing accepted':>24}")
 
@@ -70,7 +70,7 @@ def main() -> None:
 
     report("classifier only", classifier_rejects(clothing), classifier_rejects(non_clothing))
     for threshold in (0.2, 0.3, 0.4, 0.5):
-        marker = "  <- shipped" if threshold == vision_model.CLOTHING_GATE_THRESHOLD else ""
+        marker = "  <- shipped" if threshold == clothing_gate.CLOTHING_GATE_THRESHOLD else ""
         report(f"classifier + zero-shot gate < {threshold}{marker}",
                classifier_rejects(clothing) | (p_clothing < threshold),
                classifier_rejects(non_clothing) | (p_non_clothing < threshold))

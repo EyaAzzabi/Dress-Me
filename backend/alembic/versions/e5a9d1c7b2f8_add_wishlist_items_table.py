@@ -1,7 +1,7 @@
 """add wishlist_items table
 
 Revision ID: e5a9d1c7b2f8
-Revises: c3f1a8d2e6b4
+Revises: d2f7a9c31e58
 Create Date: 2026-10-10 21:50:00.000000
 
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'e5a9d1c7b2f8'
-down_revision: Union[str, Sequence[str], None] = 'c3f1a8d2e6b4'
+down_revision: Union[str, Sequence[str], None] = 'd2f7a9c31e58'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

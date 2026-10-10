@@ -33,3 +33,25 @@ export function recommendOutfits(payload: OutfitRequest) {
 export function listOutfits() {
   return apiClient.get<Outfit[]>("/recommendations/outfits").then((r) => r.data);
 }
+
+export interface CatalogAlternative {
+  name: string;
+  price: string | number | null;
+  brand: string | null;
+  category: string | null;
+  image_url: string | null;
+}
+
+export interface PurchaseCheckResult {
+  verdict: "recommended" | "think_twice" | "not_recommended";
+  compatibility_score: number;
+  similar_item_ids: string[];
+  catalog_alternatives: CatalogAlternative[];
+  explanation: string;
+}
+
+export function checkPurchase(imageUrl: string) {
+  return apiClient
+    .post<PurchaseCheckResult>("/purchase/check", { image_url: imageUrl })
+    .then((r) => r.data);
+}
