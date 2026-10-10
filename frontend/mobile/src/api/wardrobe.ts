@@ -1,7 +1,8 @@
+import { isAxiosError } from "axios";
 import { Platform } from "react-native";
 
 import { apiClient } from "@/api/client";
-import { ClothingItem } from "@/types/models";
+import { ClothingItem, ItemUsage, Season } from "@/types/models";
 
 export function listWardrobeItems() {
   return apiClient.get<ClothingItem[]>("/wardrobe/").then((r) => r.data);
@@ -38,10 +39,40 @@ export async function uploadPhoto(localUri: string) {
     .then((r) => r.data.image_url);
 }
 
-export function addWardrobeItem(imageUrl: string, season?: string) {
+/** What POST /wardrobe/ answers (422) when the model isn't sure of a photo's category — often a photo of several pieces. */
+export interface LowCategoryConfidence {
+  message: string;
+  suggested_category: string;
+  confidence: number;
+}
+
+export function parseLowCategoryConfidence(error: unknown): LowCategoryConfidence | null {
+  if (!isAxiosError(error)) return null;
+  const detail = error.response?.data?.detail;
+  return detail && typeof detail === "object" && detail.code === "low_category_confidence" ? detail : null;
+}
+
+/** `category` is the owner's own answer when the model wasn't sure (see parseLowCategoryConfidence). */
+export function addWardrobeItem(imageUrl: string, season?: string, category?: string) {
   return apiClient
-    .post<ClothingItem>("/wardrobe/", { image_url: imageUrl, season })
+    .post<ClothingItem>("/wardrobe/", { image_url: imageUrl, season, category })
     .then((r) => r.data);
+}
+
+export function updateWardrobeItem(
+  itemId: string,
+  changes: Partial<Pick<ClothingItem, "category" | "colors" | "style" | "pattern">> & { season?: Season }
+) {
+  return apiClient.patch<ClothingItem>(`/wardrobe/${itemId}`, changes).then((r) => r.data);
+}
+
+export function listWardrobeUsage() {
+  return apiClient.get<ItemUsage[]>("/wardrobe/usage").then((r) => r.data);
+}
+
+/** "Je l'ai porté": records the item as worn today. */
+export function markItemWorn(itemId: string) {
+  return apiClient.post<ItemUsage>(`/wardrobe/${itemId}/worn`).then((r) => r.data);
 }
 
 export function removeWardrobeItem(itemId: string) {

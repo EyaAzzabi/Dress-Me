@@ -25,6 +25,12 @@ const TRIP_TYPES: { value: TripType; label: string }[] = [
   { value: "tourisme", label: "Sightseeing" },
 ];
 
+const SEASON_LABELS: Record<string, string> = {
+  ete: "Summer",
+  hiver: "Winter",
+  mi_saison: "Mid-season",
+};
+
 export default function PackingScreen() {
   const { colors } = useTheme();
   const [lists, setLists] = useState<PackingList[]>([]);
@@ -32,6 +38,7 @@ export default function PackingScreen() {
   const [creating, setCreating] = useState(false);
   const [destination, setDestination] = useState("");
   const [durationDays, setDurationDays] = useState("3");
+  const [startDate, setStartDate] = useState("");
   const [tripType, setTripType] = useState<TripType>("plage");
   const [error, setError] = useState<string | null>(null);
 
@@ -58,10 +65,15 @@ export default function PackingScreen() {
       setError("Enter a destination and a valid number of days.");
       return;
     }
+    const start = startDate.trim();
+    if (start && !/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+      setError("Start date must look like 2026-12-24 (or leave it empty).");
+      return;
+    }
     setError(null);
     setCreating(true);
     try {
-      const created = await createPackingList(destination.trim(), duration, tripType);
+      const created = await createPackingList(destination.trim(), duration, tripType, start || undefined);
       setLists((prev) => [created, ...prev]);
       setDestination("");
     } catch (err: any) {
@@ -99,6 +111,12 @@ export default function PackingScreen() {
           value={durationDays}
           onChangeText={setDurationDays}
         />
+        <TextField
+          placeholder="Start date, e.g. 2026-12-24 (optional)"
+          value={startDate}
+          onChangeText={setStartDate}
+          autoCapitalize="none"
+        />
         <View style={styles.pillRow}>
           {TRIP_TYPES.map((t) => (
             <Pill key={t.value} label={t.label} active={tripType === t.value} onPress={() => setTripType(t.value)} />
@@ -118,6 +136,7 @@ export default function PackingScreen() {
                 <Text style={[styles.destination, { color: colors.text }]}>{list.destination}</Text>
                 <SectionLabel>
                   {list.duration_days} days · {TRIP_TYPES.find((t) => t.value === list.trip_type)?.label ?? list.trip_type}
+                  {list.season ? ` · ${SEASON_LABELS[list.season] ?? list.season}` : ""}
                 </SectionLabel>
               </View>
               <Pressable onPress={() => handleDelete(list.id)}>

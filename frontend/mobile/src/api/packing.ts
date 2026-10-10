@@ -8,14 +8,17 @@ export interface PackingList {
   destination: string;
   duration_days: number;
   trip_type: TripType;
+  start_date?: string | null;
+  season?: string | null;
   item_ids: string[];
   checked_item_ids: string[];
   items: ClothingItem[];
 }
 
-export function createPackingList(destination: string, durationDays: number, tripType: TripType) {
+/** startDate (YYYY-MM-DD) is optional: when given it sets the season and pulls in outfits already planned for those days. */
+export function createPackingList(destination: string, durationDays: number, tripType: TripType, startDate?: string) {
   return apiClient
-    .post<PackingList>("/packing/", { destination, duration_days: durationDays, trip_type: tripType })
+    .post<PackingList>("/packing/", { destination, duration_days: durationDays, trip_type: tripType, start_date: startDate })
     .then((r) => r.data);
 }
 

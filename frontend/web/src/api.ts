@@ -4,10 +4,24 @@ const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api/v1";
 
 export const api = axios.create({ baseURL: API_URL });
 
+/** What POST /wardrobe/ answers (422) when the model isn't sure of a photo's category — often a photo of several pieces. */
+export interface LowCategoryConfidence {
+  message: string;
+  suggested_category: string;
+  confidence: number;
+}
+
+export function parseLowCategoryConfidence(error: unknown): LowCategoryConfidence | null {
+  if (!axios.isAxiosError(error)) return null;
+  const detail = error.response?.data?.detail;
+  return detail && typeof detail === "object" && detail.code === "low_category_confidence" ? detail : null;
+}
+
 export function getApiError(error: unknown): string {
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
     if (typeof detail === "string") return detail;
+    if (detail && typeof detail.message === "string") return detail.message;
     if (error.response?.status === 0 || !error.response) {
       return "Impossible de joindre le serveur. Vérifie que l’API DressMe est démarrée.";
     }
@@ -28,7 +42,9 @@ export interface ClothingItem {
   colors?: string[] | null;
   style?: string | null;
   season?: string | null;
+  season_source?: "user" | "vision" | null;
   pattern?: string | null;
+  attribute_confidence?: Record<string, number> | null;
   created_at: string;
 }
 
@@ -43,6 +59,8 @@ export interface Outfit {
 export interface ScheduledOutfit {
   date: string;
   item_ids: string[];
+  /** The user's avatar wearing the outfit, once rendered (POST /calendar/{day}/render). */
+  render_image_url?: string | null;
   items: ClothingItem[];
 }
 
@@ -54,11 +72,19 @@ export interface StyleProfile {
   narrative: string | null;
 }
 
+export interface ItemUsage {
+  item_id: string;
+  wear_count: number;
+  last_worn: string;
+}
+
 export interface PackingList {
   id: string;
   destination: string;
   duration_days: number;
   trip_type: "plage" | "business" | "tourisme";
+  start_date?: string | null;
+  season?: string | null;
   item_ids: string[];
   checked_item_ids: string[];
   items: ClothingItem[];
