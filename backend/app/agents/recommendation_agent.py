@@ -1,3 +1,5 @@
+import uuid
+from datetime import date, timedelta
 from itertools import product
 from typing import Any
 
@@ -15,6 +17,8 @@ OPTIONAL_SLOTS = ["veste", "chaussures", "sac", "accessoire"]
 
 
 STYLE_MATCH_BONUS = 0.1  # all pieces share the user's #1 favorite style
+RECENT_WEAR_DAYS = 3  # a piece worn this recently is less appealing to suggest again
+RECENT_WEAR_PENALTY = 0.05  # per recently worn piece in the outfit
 
 
 class RecommendationAgent(BaseAgent):
@@ -31,14 +35,19 @@ class RecommendationAgent(BaseAgent):
       shares the same `style` label *and* that's the user's own top favorite style
       (from StyleProfileAgent) — rewards dressing like the user actually dresses,
       not just visual similarity, which a photo embedding alone can't tell you.
+    - Freshness: a small penalty per piece worn in the last few days (`usage`, from
+      MetadataAgent.usage_history), so the same outfit isn't suggested two days running.
     """
 
     name = "recommendation_agent"
 
     def run(
         self, *, wardrobe_items: list[ClothingItem], occasion: str | None = None,
-        favorite_styles: list[str] | None = None, top_k: int = 3, **kwargs: Any,
+        favorite_styles: list[str] | None = None, top_k: int = 3,
+        usage: dict[uuid.UUID, dict[str, Any]] | None = None, today: date | None = None, **kwargs: Any,
     ) -> dict[str, Any]:
+        usage = usage or {}
+        recent_cutoff = (today or date.today()) - timedelta(days=RECENT_WEAR_DAYS)
         top_style = favorite_styles[0] if favorite_styles else None
 
         by_category: dict[str, list[ClothingItem]] = {}
@@ -82,6 +91,11 @@ class RecommendationAgent(BaseAgent):
             visual_score = _mean_pairwise_compatibility(outfit_vecs)
             style_match = _matches_favorite_style(outfit, top_style)
             score = min(1.0, visual_score + (STYLE_MATCH_BONUS if style_match else 0.0))
+            recent = sum(
+                1 for item in outfit
+                if item.id in usage and usage[item.id]["last_worn"] > recent_cutoff
+            )
+            score = max(0.0, score - RECENT_WEAR_PENALTY * recent)
             candidates.append((outfit, score, style_match))
 
         candidates.sort(key=lambda c: c[1], reverse=True)

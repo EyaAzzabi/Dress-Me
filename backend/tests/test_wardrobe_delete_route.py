@@ -30,6 +30,9 @@ class _FakeQuery:
     def first(self):
         return self.item
 
+    def delete(self):  # wear-log cleanup
+        return 0
+
 
 class _FakeDb:
     def __init__(self, item):
@@ -60,7 +63,7 @@ def fake_db():
 def test_delete_wardrobe_item_accepts_uuid_path_parameter(fake_db, monkeypatch):
     deleted_embeddings = []
     monkeypatch.setattr(
-        "app.api.routes.wardrobe.vector_store.delete_item_embedding",
+        "app.agents.metadata_agent.vector_store.delete_item_embedding",
         lambda item_id: deleted_embeddings.append(item_id),
     )
 

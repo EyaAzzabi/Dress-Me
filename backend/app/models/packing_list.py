@@ -1,8 +1,9 @@
 import json
 import uuid
+from datetime import date as date_type
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator, Uuid
 
@@ -40,6 +41,9 @@ class PackingList(Base):
     destination: Mapped[str] = mapped_column(String(255), nullable=False)
     duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
     trip_type: Mapped[str] = mapped_column(String(50), nullable=False)  # plage | business | tourisme
+    start_date: Mapped[date_type | None] = mapped_column(Date)
+    # The season the list was built for (ete | hiver | mi_saison) — see app/services/seasons.py.
+    season: Mapped[str | None] = mapped_column(String(20))
 
     item_ids: Mapped[list[uuid.UUID]] = mapped_column(JSONUUIDList, nullable=False)
     checked_item_ids: Mapped[list[uuid.UUID]] = mapped_column(JSONUUIDList, nullable=False, default=list)

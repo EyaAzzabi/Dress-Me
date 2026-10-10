@@ -16,6 +16,8 @@ class ScheduledOutfitRead(BaseModel):
     # Resolved items (not just ids) — the calendar UI needs image_url/category to
     # render a thumbnail per planned day without a second round-trip per item.
     items: list[ClothingItemRead]
+    # The user's avatar wearing this outfit, once rendered (POST /calendar/{day}/render).
+    render_image_url: str | None = None
 
     class Config:
         from_attributes = True

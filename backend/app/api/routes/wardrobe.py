@@ -1,15 +1,22 @@
 import uuid
+from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
+from app.agents.metadata_agent import MetadataAgent
 from app.agents.vision_agent import VisionAgent
 from app.api.deps import get_current_user
-from app.db import vector_store
 from app.db.session import get_db
 from app.models.clothing_item import ClothingItem
 from app.models.user import User
-from app.schemas.clothing_item import ClothingItemCreate, ClothingItemRead
+from app.schemas.clothing_item import (
+    ClothingItemCreate,
+    ClothingItemRead,
+    ClothingItemUpdate,
+    ItemUsage,
+    WornPayload,
+)
 from app.services.storage import StorageService
 
 router = APIRouter(prefix="/wardrobe", tags=["wardrobe"])
@@ -36,13 +43,26 @@ async def upload_photo(
 
 @router.get("/", response_model=list[ClothingItemRead])
 def list_items(
-    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    category: str | None = None,
+    season: str | None = None,
+    style: str | None = None,
+    color: str | None = None,
+    q: str | None = Query(None, description="Free-text search over category/style/season/pattern/colors"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> list[ClothingItem]:
-    return (
-        db.query(ClothingItem)
-        .filter(ClothingItem.owner_id == current_user.id)
-        .all()
-    )
+    return MetadataAgent(db).run(
+        user_id=current_user.id, category=category, season=season, style=style, color=color, query=q
+    )["items"]
+
+
+@router.get("/usage", response_model=list[ItemUsage])
+def item_usage(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> list[dict]:
+    """How often / how recently each item appears in the owner's planned outfits."""
+    history = MetadataAgent(db).usage_history(user_id=current_user.id)
+    return [{"item_id": item_id, **entry} for item_id, entry in history.items()]
 
 
 @router.post("/", response_model=ClothingItemRead, status_code=201)
@@ -51,33 +71,72 @@ def add_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ClothingItem:
-    attributes = vision_agent.run(image_url=payload.image_url)
+    try:
+        attributes = vision_agent.run(image_url=payload.image_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if attributes["category"] == "hors_perimetre":
         raise HTTPException(
             status_code=422,
             detail="This photo doesn't look like a clothing item — try a clearer photo of the item alone.",
         )
-
-    item_id = uuid.uuid4()
-    # The Pinecone vector id *is* the ClothingItem id — one less id to keep in sync.
-    vector_store.upsert_item_embedding(
-        item_id, attributes["embedding"], owner_id=current_user.id, category=attributes["category"]
-    )
-    item = ClothingItem(
-        id=item_id,
-        owner_id=current_user.id,
+    if attributes.get("category_uncertain") and payload.category is None:
+        # Most often a photo of several pieces at once. Not an error in the request, but
+        # saving a wrong category would quietly spoil outfit suggestions — so ask, and let
+        # the client resend the same photo with the owner's `category`.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "low_category_confidence",
+                "message": (
+                    "On n'est pas sûr de la catégorie de cette pièce — la photo montre peut-être "
+                    "plusieurs vêtements. Confirme la catégorie, ou ajoute une photo d'une seule pièce."
+                ),
+                "suggested_category": attributes["category"],
+                "confidence": attributes["confidence"]["category"],
+            },
+        )
+    return MetadataAgent(db).add_item(
+        user_id=current_user.id,
         image_url=payload.image_url,
-        category=attributes["category"],
-        colors=attributes["colors"],
-        style=attributes["style"],
+        attributes=attributes,
         season=payload.season,
-        pattern=attributes["pattern"],
-        embedding_id=str(item_id) if vector_store.is_configured() else None,
+        category=payload.category,
     )
-    db.add(item)
-    db.commit()
-    db.refresh(item)
+
+
+@router.patch("/{item_id}", response_model=ClothingItemRead)
+def update_item(
+    item_id: uuid.UUID,
+    payload: ClothingItemUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ClothingItem:
+    item = MetadataAgent(db).update_item(
+        user_id=current_user.id,
+        item_id=item_id,
+        changes=payload.model_dump(exclude_unset=True, exclude_none=True),
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found.")
     return item
+
+
+@router.post("/{item_id}/worn", response_model=ItemUsage)
+def mark_worn(
+    item_id: uuid.UUID,
+    payload: WornPayload | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """"Je l'ai porté": records the item as worn on a day (default today)."""
+    agent = MetadataAgent(db)
+    day = payload.day if payload else None
+    if day is not None and day > date.today():
+        raise HTTPException(status_code=422, detail="You can't mark an item as worn in the future.")
+    if not agent.log_worn(user_id=current_user.id, item_id=item_id, day=day):
+        raise HTTPException(status_code=404, detail="Item not found.")
+    return {"item_id": item_id, **agent.usage_history(user_id=current_user.id)[item_id]}
 
 
 @router.delete("/{item_id}", status_code=204)
@@ -86,12 +145,4 @@ def remove_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
-    item = (
-        db.query(ClothingItem)
-        .filter(ClothingItem.id == item_id, ClothingItem.owner_id == current_user.id)
-        .first()
-    )
-    if item:
-        vector_store.delete_item_embedding(item.id)
-        db.delete(item)
-        db.commit()
+    MetadataAgent(db).remove_item(user_id=current_user.id, item_id=item_id)
