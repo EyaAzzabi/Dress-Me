@@ -10,8 +10,10 @@ def _agent_with_settings(monkeypatch, **overrides) -> TryOnAgent:
     overrides.setdefault("tryon_provider", "replicate")
     overrides.setdefault("replicate_api_token", None)
     overrides.setdefault("replicate_tryon_model_version", None)
-    settings = Settings(**overrides)
+    settings = Settings(_env_file=None, **overrides)
     monkeypatch.setattr("app.agents.tryon_agent.get_settings", lambda: settings)
+    # The nested storage service must see the same isolated test settings.
+    monkeypatch.setattr("app.services.storage.get_settings", lambda: settings)
     return TryOnAgent()
 
 
