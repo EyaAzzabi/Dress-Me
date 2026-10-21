@@ -1,0 +1,106 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "reviewDoc": "e:/Documents/Dress-Me/.agents/tasks/design-review.md",
+  "summary": "Le design couvre les 3 axes (fine-tuning, RAG contextuel, prompt engineering+LLM) et reste structurellement additif, mais l'axe 1 (fine-tuning) repose sur 6 features dont 4 (season_compat, style_match, history_fit, freshness) ne sont pas calculables sur les donnees d'entrainement choisies (Polyvore n'a ni season ni style par item, ni historique d'usage). Plusieurs affirmations 'tests existants inchanges' sont erronees et des incoherences entre sections bloquent l'implementation. 1 HIGH, 7 MEDIUM, 6 NIT.",
+  "counts": { "HIGH": 1, "MEDIUM": 7, "NIT": 6 },
+  "findings": [
+    {
+      "id": 1,
+      "severity": "HIGH",
+      "location": "Axe 1 - Fine-tuning, tableau des features + ml/notebooks/10_ranking_model.py",
+      "problem": "La LogisticRegression est entrainee sur 6 features, mais 4 d'entre elles ne sont pas calculables sur Polyvore : season_compat et style_match (items Polyvore n'ont ni season ni style, verifie dans ml/src/catalog.py : season=pd.NA, style=pd.NA), history_fit (aucun historique utilisateur pour Polyvore) et freshness (aucun WearLog pour Polyvore). Seules visual_coherence et context_fit sont calculables. Si on force les 4 autres a 0/constantes a l'entrainement, leurs poids appris sont non informatifs, et a l'inference (items reels avec vraie season/style/usage) la regression applique des poids non calibres a des features qui varient. freshness perd sa penalite (poids ~0) et history_fit ne transmet jamais le signal RAG au classement, contredisant l'exigence 'utiliser ces recuperations pour filtrer/ranker'.",
+      "fix": "Reduire le rangifieur aux features calculables avec du signal sur Polyvore (visual_coherence + context_fit) et appliquer season_compat, style_match, freshness et history_fit comme couche deterministe additive par-dessus le score appris (ex. final = clamp(learned + STYLE_MATCH_BONUS*style_match - RECENT_WEAR_PENALTY*freshness + alpha*history_fit), alpha fixe/calibre, non appris). Preciser dans le tableau quelles features sont apprises vs deterministes. Alternative : entrainer les features contextuelles sur les vraies donnees app (Outfit/ScheduledOutfit/WearLog + ClothingItem.season/style reels) avec 'porte/planifie' comme signal positif faible, documente avec ses limites. Choisir et specifier une des deux voies."
+    },
+    {
+      "id": 2,
+      "severity": "MEDIUM",
+      "location": "Axe 1 / Testabilite + backend/tests/test_recommendation_agent.py",
+      "problem": "Affirmation 'les tests existants restent valables et doivent rester verts' non tenue. (a) Les fixtures _FakeItem n'ont pas d'attribut season ; le calcul de season_compat (accede item.season) leve AttributeError des que l'artefact commite ranking_model.joblib est present (chemin resolu via Path(__file__)/artifacts/, aucun conftest ni monkeypatch d'artefact). (b) test_favorite_style_bonus_breaks_a_tie suppose que le bonus de style fait gagner le outfit casual ; avec la regression logistique (artefact present, RANKING_ENABLED=True par defaut), l'ordre depend du poids appris sur style_match, non garanti positif.",
+      "fix": "Specfier que les tests existants s'executent avec l'artefact de ranking absent (ou RANKING_ENABLED=False) pour exercer le fallback heuristique exact ; ajouter season=None a _FakeItem (ou utiliser getattr(item, 'season', None)) ; reserver les tests d'ordonnancement appris a de nouveaux cas (RANKING_ENABLED=True + faux modele sklearn)."
+    },
+    {
+      "id": 3,
+      "severity": "MEDIUM",
+      "location": "Axe 1/Fichiers (kwargs recommendation_agent) vs Axe 3/orchestrator vs ranking_model.context_vector",
+      "problem": "Incoherence sur weather_band. La liste des kwargs ajoutes a recommendation_agent.run (season, temperature, weather, occasion_category, formality, references) n'inclut pas weather_band, mais ranking_model.context_vector(occasion_category, season, weather_band) l'exige, et la section orchestrator dit passer weather_band. On ne sait pas si l'agent derive weather_band de temperature ou le recoit.",
+      "fix": "Soit ajouter weather_band aux kwargs, soit ecrire explicitement : weather_band = occasions.weather_band(temperature) dans recommendation_agent.run avant l'appel a context_vector. Trancher."
+    },
+    {
+      "id": 4,
+      "severity": "MEDIUM",
+      "location": "Axe 2 / retrieve_references + integration RAG->classement (history_fit)",
+      "problem": "Le schema de retour de retrieve_references est {historical:[{item_ids,score,date,season}], catalog:{...}} sans les vecteurs. Or history_fit = max_ref(mean(outfit_vecs) · mean(ref_vecs)) necessite les vecteurs (ou vecteur moyen) des outfits de reference. Le module RAG les calcule deja pour scorer mais ne les retourne pas ; sans cela, le RecommendationAgent doit refetcher les embeddings (double appel Pinecone) - non specifie.",
+      "fix": "Ajouter 'vec': np.ndarray (vecteur moyen de l'outfit de reference) a chaque entree historical, ou specifier explicitement que le RecommendationAgent refetche via vector_store.fetch_embeddings(ref_item_ids) (Pinecone off -> history_fit=0)."
+    },
+    {
+      "id": 5,
+      "severity": "MEDIUM",
+      "location": "Axe 1 / Artefacts produits + Risques (#3 surapprentissage)",
+      "problem": "Absence de critere de ship-gate. Le design commite ranking_model.joblib quelle que soit la performance, et RANKING_ENABLED=True par defaut l'utilise a l'inference. Si le rangifieur ne bat pas l'heuristique (le design l'envisage lui-meme), un artefact moins bon que l'heuristique serait utilise par defaut et degraderait le classement existant. Le kill-switch existe mais n'est pas un critere de publication.",
+      "fix": "Specfier un seuil de publication, ex. 'ne commiter ranking_model.joblib que si AUC/accuracy held-out bat la baseline heuristique d'au moins delta (ex. +0.02 AUC) ; sinon laisser l'artefact absent pour que le runtime retombe sur l'heuristique'. Lier ce seuil a la section Findings du notebook."
+    },
+    {
+      "id": 6,
+      "severity": "MEDIUM",
+      "location": "Axe 3 / Testabilite + backend/tests/test_context_agent.py",
+      "problem": "test_no_city_leaves_weather_none asserte result == {occasion, weather, season} (egalite exacte). Le design ajoute occasion_category, formality, dress_code, temperature, weather_band au dict retourne (toujours : parse_occasion_rules renvoie une categorie meme pour occasion=None). L'egalite exacte casse. Le design dit 'comportement inchange' (meteo/season None) mais ne dit pas de relacher l'assertion.",
+      "fix": "Remplacer l'assertion exacte par des verifications de sous-ensemble : assert result['occasion']=='wedding' and result['weather'] is None and result['season'] is None (plus assertions sur les nouvelles cles). Le mentionner explicitement dans la section Testabilite (axe 3)."
+    },
+    {
+      "id": 7,
+      "severity": "MEDIUM",
+      "location": "Axe 3 / occasions.parse_occasion_rules",
+      "problem": "Mapping ambigu : l'exemple 'mariage|wedding|church -> mariage/ceremonie, form. 5' mappe un jeu de mots-cles a deux categories. Un mappeur deterministe doit renvoyer exactement une categorie (pour indexer ctx_vec).",
+      "fix": "Definir un mapping injectif, ex. mariage|wedding -> 'mariage' ; church|funeral|baptism|ceremonie -> 'ceremonie'. Fournir la table complete (les 8 categories) plutot qu'un exemple a barre oblique."
+    },
+    {
+      "id": 8,
+      "severity": "MEDIUM",
+      "location": "Axe 2 / Sources de retrieval (historique d'usage)",
+      "problem": "Le design liste WearLog + ScheduledOutfit + Outfit comme sources d'outfits passes. Mais WearLog enregistre un (item, jour), pas un outfit - il faut regrouper par date pour reconstruire un ensemble. Et Outfit n'a que created_at/occasion, pas de date de port ; deriver 'la saison de la date' via seasons.season_for_date est sémantiquement faible pour Outfit. Le champ date du retour historical est donc indefini pour la source Outfit.",
+      "fix": "Preciser par source : ScheduledOutfit -> item_ids + date (via season_for_date) ; WearLog -> grouper par date les items portes ce jour ; Outfit -> soit exclure (pas de date de port), soit utiliser created_at avec une note que c'est la date de generation. Trancher dans la section Sources de retrieval."
+    },
+    {
+      "id": 9,
+      "severity": "NIT",
+      "location": "Axe 1 / Artefacts produits (taille de context_vectors.npz)",
+      "problem": "8 occasions x 3 saisons x 3 bandes = 72 combos ; + 9 fallbacks = 81 vecteurs (~166 Ko). Le design ecrit '90 combos x 512 + 9 fallbacks' (~180 Ko), arithmetique incoherente (90 implique 10 occasions ou inclut un slot occasion=None non precise).",
+      "fix": "Preciser le decompte exact (inclut-on une combinaison occasion=None ?) et recalculer la taille."
+    },
+    {
+      "id": 10,
+      "severity": "NIT",
+      "location": "Axe 1 / ranking_model.context_vector (chaine de fallback)",
+      "problem": "La branche fallback 'occasion absente du vocabulaire' est partiellement morte : parse_occasion_rules renvoie toujours une categorie du vocabulaire (defaut casual_quotidien) et LLMAgent.parse_occasion valide categorie dans le vocab. Donc occasion_category n'est jamais None ni hors-vocab ; le vrai declencheur du vecteur nul est season=None ET weather_band=None (pas de temperature).",
+      "fix": "Reformuler la chaine de fallback pour refléter le cas reel (absence de season/weather_band, pas d'occasion hors-vocab)."
+    },
+    {
+      "id": 11,
+      "severity": "NIT",
+      "location": "Axe 3 / llm_agent refactor (_chat)",
+      "problem": "Localisation du garde-fou provider=='none' sans reseau non specifiee apres le refactor _chat. test_no_provider_returns_none_without_a_network_call exige qu'aucun httpx.post ne soit emis pour provider=none. Le design dit que run 'appelle _chat' sans preciser ou vit le court-circuit provider=none.",
+      "fix": "Preciser ou vit la garde if provider == 'none': return None (dans run, parse_occasion, explain_outfit - avant tout appel a _chat)."
+    },
+    {
+      "id": 12,
+      "severity": "NIT",
+      "location": "Axe 1 / ranking_model.score_outfit fallback heuristique",
+      "problem": "Le design ecrit min(1, visual+STYLE_MATCH_BONUS*style_match) - RECENT_WEAR_PENALTY*freshness. Le code reel est score = min(1.0, visual + (STYLE_MATCH_BONUS if style_match else 0.0)) puis score = max(0.0, score - RECENT_WEAR_PENALTY * recent) ou recent est le nombre entier d'items portes recemment (usage[item.id]['last_worn'] > recent_cutoff).",
+      "fix": "Specfier la replication exacte : max(0, min(1, visual + bonus)) - penalty*recent avec recent = compte entier, et style_match numerique 1.0/0.0."
+    },
+    {
+      "id": 13,
+      "severity": "NIT",
+      "location": "Axe 3 / orchestrator.recommend_outfits (closure generate)",
+      "problem": "L'orchestrateur appelle generate jusqu'a deux fois (filtre saison, puis fallback tout le dressing). Si retrieve_references est appele dans la closure, cela duplique les appels RAG/Pinecone. references ne depend que du contexte/DB, pas des items.",
+      "fix": "Calculer references une fois avant la closure generate et les passer aux deux appels."
+    },
+    {
+      "id": 14,
+      "severity": "NIT",
+      "location": "Axe 1+2 / config.py (kill-switches RANKING_ENABLED / CONTEXTUAL_RAG_ENABLED)",
+      "problem": "Les kill-switches (defaut True) sont mentionnes mais le design n'indique pas ou ils sont lus (ranking_model.score_outfit ? recommendation_agent.run ?) ni leur effet precis (RANKING_ENABLED=False -> heuristique ; CONTEXTUAL_RAG_ENABLED=False -> references=None).",
+      "fix": "Preciser le point de lecture et l'effet de chaque flag (court-circuit avant chargement d'artefact / avant l'appel RAG)."
+    }
+  ]
+}

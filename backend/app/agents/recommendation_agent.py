@@ -90,10 +90,18 @@ class RecommendationAgent(BaseAgent):
             bases.append([robe])
 
         candidates = []
+        used_accessories = set()  # Track used accessories for diversity
+        used_base_items = set()  # Track used base items (haut/bas/robe) for diversity
+        
         for base in bases:
             base_vecs = [v for item in base if (v := vec(item)) is not None]
             if len(base_vecs) != len(base):
                 continue  # an item in this base has no embedding — can't score it fairly
+
+            # Skip this base if any item is already heavily used
+            # Allow each base item to appear maximum 1 time in top candidates
+            if any(item.id in used_base_items for item in base):
+                continue
 
             outfit = list(base)
             outfit_vecs = list(base_vecs)
@@ -102,14 +110,36 @@ class RecommendationAgent(BaseAgent):
                 slot_options = [(item, v) for item in by_category.get(slot, []) if (v := vec(item)) is not None]
                 if not slot_options:
                     continue
-                def avg_compat_with_base(pair, base_vecs=base_vecs):
-                    return np.mean([compatibility_model.pair_compatibility(pair[1], bv) for bv in base_vecs])
+                
+                # Filter out already used accessories to encourage diversity
+                available_options = [
+                    (item, v) for item, v in slot_options 
+                    if item.id not in used_accessories
+                ]
+                
+                # If all accessories already used, reuse them
+                if not available_options:
+                    available_options = slot_options
+                
+                def avg_compat_with_base(pair, base_vecs=base_vecs, base=base):
+                    item, vec = pair
+                    # Pass clothing items and context to compatibility model
+                    scores = []
+                    for i, base_item in enumerate(base):
+                        score = compatibility_model.pair_compatibility(
+                            vec, base_vecs[i],
+                            item_a=item, item_b=base_item,
+                            season=season, occasion=occasion
+                        )
+                        scores.append(score)
+                    return np.mean(scores)
 
-                best_item, best_vec = max(slot_options, key=avg_compat_with_base)
+                best_item, best_vec = max(available_options, key=avg_compat_with_base)
                 outfit.append(best_item)
                 outfit_vecs.append(best_vec)
+                used_accessories.add(best_item.id)  # Mark as used
 
-            visual_score = _mean_pairwise_compatibility(outfit_vecs)
+            visual_score = _mean_pairwise_compatibility(outfit_vecs, outfit, season, occasion)
             style_match = _matches_favorite_style(outfit, top_style)
             recent = sum(
                 1 for item in outfit
@@ -148,8 +178,35 @@ class RecommendationAgent(BaseAgent):
                     ranking_enabled=False,
                 )
             candidates.append((outfit, score, style_match))
+            
+            # Mark base items as used for diversity
+            for item in base:
+                used_base_items.add(item.id)
 
         candidates.sort(key=lambda c: c[1], reverse=True)
+        
+        # Diversify final selection: prefer outfits with different items
+        diverse_outfits = []
+        used_items = set()
+        
+        for outfit, score, style_match in candidates:
+            # Calculate how many items are already used in previous selections
+            overlap = sum(1 for item in outfit if item.id in used_items)
+            
+            # Prefer outfits with less overlap (more diverse)
+            if len(diverse_outfits) < top_k:
+                diverse_outfits.append((outfit, score, style_match))
+                # Mark items as used
+                for item in outfit:
+                    used_items.add(item.id)
+            elif overlap <= 1:  # Allow some overlap but not too much
+                # Check if this diverse outfit has a decent score
+                if score >= diverse_outfits[-1][1] * 0.85:  # Within 15% of worst selected
+                    diverse_outfits[-1] = (outfit, score, style_match)
+                    # Update used items
+                    for item in outfit:
+                        used_items.add(item.id)
+        
         outfits = [
             {
                 "item_ids": [item.id for item in outfit],
@@ -162,7 +219,7 @@ class RecommendationAgent(BaseAgent):
                     references=references,
                 ),
             }
-            for outfit, score, style_match in candidates[:top_k]
+            for outfit, score, style_match in diverse_outfits
         ]
         return {"outfits": outfits}
 
@@ -173,13 +230,25 @@ def _matches_favorite_style(outfit: list[ClothingItem], top_style: str | None) -
     return all(item.style == top_style for item in outfit)
 
 
-def _mean_pairwise_compatibility(vectors: list[np.ndarray]) -> float:
+def _mean_pairwise_compatibility(vectors: list[np.ndarray], items: list = None, 
+                                season: str | None = None, occasion: str | None = None) -> float:
+    """Calculate mean pairwise compatibility with contextual features"""
     if len(vectors) < 2:
         return 1.0
     total, count = 0.0, 0
     for i in range(len(vectors)):
         for j in range(i + 1, len(vectors)):
-            total += compatibility_model.pair_compatibility(vectors[i], vectors[j])
+            if items is not None and len(items) == len(vectors):
+                # Use contextual compatibility
+                compat = compatibility_model.pair_compatibility(
+                    vectors[i], vectors[j],
+                    item_a=items[i], item_b=items[j],
+                    season=season, occasion=occasion
+                )
+            else:
+                # Fallback to basic compatibility
+                compat = compatibility_model.pair_compatibility(vectors[i], vectors[j])
+            total += compat
             count += 1
     return total / count
 

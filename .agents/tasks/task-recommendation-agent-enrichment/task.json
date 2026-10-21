@@ -1,0 +1,7 @@
+{
+  "task_id": "task-recommendation-agent-enrichment",
+  "task_description": "Enrichir le RecommendationAgent de DressMe sur 3 axes (fine-tuning du classement, RAG contextuel, prompt engineering + LLM) en réutilisant l'infra existante (Pinecone, LLMAgent, ContextAgent, modèle de compatibilité, catalogue tunisien), sans casser le comportement existant. Suivre le design APPROVED à .agents/tasks/design.md et intégrer les 4 MEDIUM + 6 NIT de .agents/tasks/design-review.md (notés review-F<n>).",
+  "status": "pending",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004", "FEAT-005"],
+  "blocked_reason": null
+}
