@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import date, timedelta
 from itertools import product
@@ -6,9 +7,13 @@ from typing import Any
 import numpy as np
 
 from app.agents.base import BaseAgent
+from app.core.config import get_settings
 from app.db import vector_store
-from app.ml import compatibility_model
+from app.ml import compatibility_model, ranking_model
 from app.models.clothing_item import ClothingItem
+from app.services import occasions, seasons
+
+logger = logging.getLogger(__name__)
 
 # Optional slots greedily filled with the single best-matching item per category, not
 # enumerated combinatorially — keeps this O(wardrobe size) instead of exploding with
@@ -44,11 +49,27 @@ class RecommendationAgent(BaseAgent):
     def run(
         self, *, wardrobe_items: list[ClothingItem], occasion: str | None = None,
         favorite_styles: list[str] | None = None, top_k: int = 3,
-        usage: dict[uuid.UUID, dict[str, Any]] | None = None, today: date | None = None, **kwargs: Any,
+        usage: dict[uuid.UUID, dict[str, Any]] | None = None, today: date | None = None,
+        season: str | None = None, temperature: float | None = None, weather: str | None = None,
+        occasion_category: str | None = None, formality: int | None = None,
+        references: dict | None = None, ctx_vec: np.ndarray | None = None,
+        llm_agent: Any = None, **kwargs: Any,
     ) -> dict[str, Any]:
         usage = usage or {}
         recent_cutoff = (today or date.today()) - timedelta(days=RECENT_WEAR_DAYS)
         top_style = favorite_styles[0] if favorite_styles else None
+
+        # Resolve the shared context vector for this run. The orchestrator (FEAT-005)
+        # computes ctx_vec once before the generate closure and passes it here to avoid
+        # double computation (review-F1). When ctx_vec is None (direct calls / tests),
+        # derive weather_band from temperature (review-F1/F3 — weather_band is NEVER a
+        # kwarg, only derived) and look the vector up. weather_band is always derived
+        # so it stays available for the deterministic explanation note below too.
+        weather_band = occasions.weather_band(temperature)
+        if ctx_vec is None:
+            ctx_vec = ranking_model.context_vector(occasion_category, season, weather_band)
+        ranking_enabled = get_settings().ranking_enabled
+        historical = (references or {}).get("historical", []) if references else []
 
         by_category: dict[str, list[ClothingItem]] = {}
         for item in wardrobe_items:
@@ -90,12 +111,42 @@ class RecommendationAgent(BaseAgent):
 
             visual_score = _mean_pairwise_compatibility(outfit_vecs)
             style_match = _matches_favorite_style(outfit, top_style)
-            score = min(1.0, visual_score + (STYLE_MATCH_BONUS if style_match else 0.0))
             recent = sum(
                 1 for item in outfit
                 if item.id in usage and usage[item.id]["last_worn"] > recent_cutoff
             )
-            score = max(0.0, score - RECENT_WEAR_PENALTY * recent)
+            # Contextual features feed the learned ranker (ranking_model.score_outfit);
+            # on the fallback path (RANKING_ENABLED=False / artifact absent) they are
+            # computed but ignored, so the score is the exact existing heuristic
+            # (review-F12). A failure mid-computation ranks this one outfit by the
+            # heuristic (non-fatal WARNING) so the other candidates are unaffected.
+            try:
+                outfit_mean = np.mean(outfit_vecs, axis=0)
+                context_fit = float(outfit_mean @ ctx_vec)
+                season_compat = sum(
+                    1 for it in outfit
+                    if seasons.season_compatible(getattr(it, "season", None), season)
+                ) / len(outfit)
+                history_fit = max(
+                    (float(ref["vec"] @ outfit_mean) for ref in historical),
+                    default=0.0,
+                )
+                score = ranking_model.score_outfit(
+                    visual=visual_score, context_fit=context_fit,
+                    history_fit=history_fit, season_compat=season_compat,
+                    style_match=style_match, recent=recent,
+                    ranking_enabled=ranking_enabled,
+                )
+            except Exception:  # noqa: BLE001 — non-fatal: rank this outfit by the heuristic
+                logger.warning(
+                    "contextual feature computation failed for a candidate; "
+                    "ranking it with the heuristic",
+                    exc_info=True,
+                )
+                score = ranking_model.score_outfit(
+                    visual=visual_score, style_match=style_match, recent=recent,
+                    ranking_enabled=False,
+                )
             candidates.append((outfit, score, style_match))
 
         candidates.sort(key=lambda c: c[1], reverse=True)
@@ -103,7 +154,13 @@ class RecommendationAgent(BaseAgent):
             {
                 "item_ids": [item.id for item in outfit],
                 "relevance_score": round(score, 2),
-                "explanation": _explain(outfit, score, occasion, style_match, top_style),
+                "explanation": _build_explanation(
+                    llm_agent=llm_agent, outfit=outfit, score=score, occasion=occasion,
+                    style_match=style_match, top_style=top_style, season=season,
+                    weather=weather, occasion_category=occasion_category,
+                    formality=formality, temperature=temperature, weather_band=weather_band,
+                    references=references,
+                ),
             }
             for outfit, score, style_match in candidates[:top_k]
         ]
@@ -142,3 +199,78 @@ def _explain(
     else:
         quality = "Loose match"
     return f"{quality} ({pieces}){for_occasion}{style_note}."
+
+
+def _build_explanation(
+    *, llm_agent: Any, outfit: list[ClothingItem], score: float, occasion: str | None,
+    style_match: bool, top_style: str | None, season: str | None, weather: str | None,
+    occasion_category: str | None, formality: int | None, temperature: float | None,
+    weather_band: str | None, references: dict | None,
+) -> str:
+    """Build the per-outfit explanation, truncated to ``Outfit.explanation``'s 2048
+    chars (review-F7).
+
+    When an LLM is injected (the orchestrator path with a configured provider) its
+    natural-language explanation is used as-is. Otherwise — no LLM injected, provider
+    ``none``, or an LLM/network failure — the deterministic template (``_explain``) is
+    kept and, on that fallback path only, a single deterministic adjustment note is
+    appended when the weather calls for it (review-F7: folded into ``explanation``,
+    no new schema column).
+    """
+    if llm_agent is not None:
+        facts = {
+            "items": [
+                {"category": it.category, "season": getattr(it, "season", None)}
+                for it in outfit
+            ],
+            "scores": {"relevance": round(score, 2)},
+            "context": {
+                "occasion": occasion,
+                "occasion_category": occasion_category,
+                "season": season,
+                "weather": weather,
+                "temperature": temperature,
+                "weather_band": weather_band,
+                "formality": formality,
+            },
+            "references": _references_for_llm(references),
+        }
+        expl = llm_agent.explain_outfit(facts)
+        if expl:
+            return expl[:2048]
+    text = _explain(outfit, score, occasion, style_match, top_style)
+    if weather_band == "chaud" and any(
+        it.category == "bas" and getattr(it, "season", None) == "hiver" for it in outfit
+    ):
+        text += " (il fera chaud : remplace le bas par une pièce plus légère)"
+    return text[:2048]
+
+
+def _references_for_llm(references: dict | None) -> dict | None:
+    """Project the RAG references into a JSON-serializable structure for the LLM facts.
+
+    The raw historical entries carry numpy ``vec`` arrays the model can't read and
+    ``json.dumps`` can't serialize (uuids / dates likewise); this keeps only what a
+    phrasing layer needs — item ids, scores, dates, seasons, and catalog names/brands
+    — so ``LLMAgent.explain_outfit`` can actually phrase them rather than silently
+    falling back to the template on a serialization error.
+    """
+    if not references:
+        return None
+    historical = [
+        {
+            "item_ids": [str(i) for i in ref.get("item_ids", [])],
+            "score": ref.get("score"),
+            "date": str(ref.get("date")),
+            "season": ref.get("season"),
+        }
+        for ref in references.get("historical", [])
+    ]
+    catalog = {
+        category: [
+            {"name": m.get("name"), "brand": m.get("brand"), "category": m.get("category")}
+            for m in matches
+        ]
+        for category, matches in references.get("catalog", {}).items()
+    }
+    return {"historical": historical, "catalog": catalog}

@@ -6,17 +6,21 @@ from sqlalchemy.orm import Session
 
 from app.agents.context_agent import ContextAgent
 from app.agents.extraction_agent import ExtractionAgent
+from app.agents.llm_agent import LLMAgent
 from app.agents.metadata_agent import MetadataAgent
 from app.agents.packing_agent import PackingAgent
 from app.agents.purchase_agent import PurchaseAgent
 from app.agents.recommendation_agent import RecommendationAgent
 from app.agents.style_profile_agent import StyleProfileAgent
 from app.agents.vision_agent import VisionAgent
+from app.core.config import get_settings
 from app.db import vector_store
-from app.ml import clothing_gate
+from app.ml import clothing_gate, ranking_model
 from app.models.outfit import Outfit
 from app.models.packing_list import PackingList
 from app.models.scheduled_outfit import ScheduledOutfit
+from app.rag import context_retrieval
+from app.services import occasions
 from app.services.seasons import trip_season
 
 
@@ -38,8 +42,10 @@ class AgentOrchestrator:
         self.purchase_agent = PurchaseAgent()
         self.extraction_agent = ExtractionAgent()
         self.packing_agent = PackingAgent()
-        # LLMAgent isn't called directly here — StyleProfileAgent owns its own
-        # instance (the only current consumer; see app/agents/style_profile_agent.py).
+        # Owns an LLMAgent instance so it can inject it into RecommendationAgent.run
+        # for natural-language outfit explanations (FEAT-005). StyleProfileAgent keeps
+        # its own independent instance (its run() is a separate capability).
+        self.llm_agent = LLMAgent()
 
     def recommend_outfits(
         self,
@@ -54,10 +60,28 @@ class AgentOrchestrator:
         style_profile = self.style_profile_agent.run(user_id=user_id)
         usage = self.metadata_agent.usage_history(user_id=user_id)
 
+        # Compute the shared context vector and the RAG references ONCE, before the
+        # generate closure — generate may be called up to twice (season-filtered then
+        # full wardrobe), so doing this inside it would double the work (review-F1,
+        # review-F13). weather_band is derived from temperature and never passed to
+        # run (review-F1/F3); ctx_vec is.
+        weather_band = occasions.weather_band(context.get("temperature"))
+        ctx_vec = ranking_model.context_vector(
+            context.get("occasion_category"), context.get("season"), weather_band
+        )
+        if get_settings().contextual_rag_enabled:
+            references = context_retrieval.retrieve_references(self.db, user_id, context, ctx_vec)
+        else:
+            references = None
+
         def generate(items):
             return self.recommendation_agent.run(
                 wardrobe_items=items, occasion=context["occasion"],
                 favorite_styles=style_profile["favorite_styles"], usage=usage,
+                season=context.get("season"), temperature=context.get("temperature"),
+                weather=context.get("weather"), occasion_category=context.get("occasion_category"),
+                formality=context.get("formality"), references=references, ctx_vec=ctx_vec,
+                llm_agent=self.llm_agent,
             )
 
         # Prefer pieces wearable in the context's season; if that leaves nothing to build
