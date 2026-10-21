@@ -9,6 +9,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dressme -d dressme"]
       interval: 2s
@@ -23,6 +24,8 @@ services:
       DATABASE_URL: postgresql+psycopg://dressme:dressme@postgres:5432/dressme
     ports:
       - "8000:8000"
+    volumes:
+      - wardrobe_photos:/app/media
     depends_on:
       postgres:
         # Without this, "depends_on: - postgres" only waits for the container to
@@ -33,3 +36,4 @@ services:
 
 volumes:
   postgres_data:
+  wardrobe_photos:

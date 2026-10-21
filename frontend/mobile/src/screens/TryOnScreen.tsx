@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
   avatarEmoji:   { fontSize: 44 },
   avatarHint:    { fontSize: 14 },
   avatarOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
   },

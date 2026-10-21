@@ -67,7 +67,7 @@ const styles = StyleSheet.create({
     transform: [{ scale: 1.08 }],
   },
   tint: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     opacity: 0.37,
   },
   glow: {
