@@ -1,3 +1,4 @@
+from pathlib import Path
 import time
 from typing import Any
 
@@ -89,10 +90,20 @@ class TryOnAgent(BaseAgent):
         final picture and returns its URL. `persisted` tells callers it's already ours."""
         if not StorageService().is_configured():
             raise RuntimeError("Image storage isn't configured, so the try-on result can't be kept.")
+        import inspect
         from gradio_client import Client, handle_file
 
         try:
-            client = Client(self.settings.hf_tryon_space, hf_token=self.settings.hf_token or None, verbose=False)
+            client_kwargs: dict[str, Any] = {"verbose": False}
+            sig = inspect.signature(Client.__init__)
+            token = self.settings.hf_token or None
+            if "token" in sig.parameters:
+                if token:
+                    client_kwargs["token"] = token
+            elif "hf_token" in sig.parameters:
+                client_kwargs["hf_token"] = token
+
+            client = Client(self.settings.hf_tryon_space, **client_kwargs)
             current = person_image_url
             for garment_url, category in garments:
                 job = client.submit(

@@ -117,3 +117,63 @@ export async function uploadPhoto(file: File): Promise<string> {
   const { data } = await api.post<{ image_url: string }>("/wardrobe/upload", form);
   return data.image_url;
 }
+
+export interface WardrobeAnalysisResponse {
+  category: string;
+  colors: string[];
+  pattern?: string | null;
+  style?: string | null;
+  season?: string | null;
+  category_uncertain: boolean;
+  confidence: Record<string, number>;
+  cv_diagnostics: {
+    dimensions: { width: number; height: number };
+    quality: {
+      laplacian_variance: number;
+      sharpness: "blurry" | "acceptable" | "sharp";
+      brightness: number;
+      contrast: number;
+      saturation: number;
+      quality_score: number;
+      warnings: string[];
+    };
+    bounding_box?: { x: number; y: number; w: number; h: number } | null;
+  };
+  kmeans_palette: {
+    hex: string;
+    rgb: [number, number, number];
+    percentage: number;
+    label: string;
+  }[];
+  rag_analysis: {
+    duplicate_warning?: string | null;
+    similar_items: {
+      item_id: string;
+      image_url: string;
+      category: string;
+      colors?: string[];
+      style?: string;
+      similarity: number;
+    }[];
+    recommended_pairings: {
+      item_id: string;
+      category: string;
+      colors?: string[];
+      style?: string;
+      image_url: string;
+      score: number;
+    }[];
+  };
+  styling_insights: {
+    editorial_advice: string;
+    style_archetype?: string;
+    recommended_occasions?: string[];
+    care_tip?: string;
+  };
+}
+
+export async function analyzePhoto(imageUrl: string): Promise<WardrobeAnalysisResponse> {
+  const { data } = await api.post<WardrobeAnalysisResponse>("/wardrobe/analyze", { image_url: imageUrl });
+  return data;
+}
+

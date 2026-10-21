@@ -12,4 +12,4 @@ from app.db.session import engine
 import app.models  # noqa: F401 — registers all models on Base.metadata
 
 Base.metadata.create_all(bind=engine)
-print("✅ Database tables created successfully.")
+print("[OK] Database tables created successfully.")

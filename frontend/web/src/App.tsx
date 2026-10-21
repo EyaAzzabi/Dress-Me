@@ -11,6 +11,8 @@ import {
   ScheduledOutfit,
   StyleProfile,
   uploadPhoto,
+  analyzePhoto,
+  WardrobeAnalysisResponse,
   parseLowCategoryConfidence,
   LowCategoryConfidence,
 } from "./api";
@@ -199,6 +201,12 @@ export default function App() {
   const [items, setItems] = useState<ClothingItem[]>([]);
   const [usage, setUsage] = useState<Record<string, ItemUsage>>({});
   const [categoryPrompt, setCategoryPrompt] = useState<CategoryPromptState | null>(null);
+  const [ingestionReview, setIngestionReview] = useState<{
+    imageUrl: string;
+    analysis: WardrobeAnalysisResponse;
+    selectedCategory: string;
+    selectedSeason: string;
+  } | null>(null);
   const [outfits, setOutfits] = useState<Outfit[]>([]);
   const [scheduled, setScheduled] = useState<ScheduledOutfit[]>([]);
   const [profile, setProfile] = useState<StyleProfile | null>(null);
@@ -374,14 +382,36 @@ export default function App() {
     try {
       const imageUrl = await uploadPhoto(file);
       try {
-        await submitItem(imageUrl, season);
-      } catch (cause: unknown) {
-        // The model isn't sure what this photo shows (often several pieces at once): ask
-        // the owner to confirm the category instead of saving a likely-wrong one.
-        const unsure = parseLowCategoryConfidence(cause);
-        if (!unsure) throw cause;
-        setCategoryPrompt({ ...unsure, imageUrl, season });
+        const analysis = await analyzePhoto(imageUrl);
+        setIngestionReview({
+          imageUrl,
+          analysis,
+          selectedCategory: analysis.category || "haut",
+          selectedSeason: season || analysis.season || "toutes_saisons",
+        });
+      } catch (analyzeErr) {
+        // Fallback to direct submit if analyze endpoint wasn't available
+        try {
+          await submitItem(imageUrl, season);
+        } catch (cause: unknown) {
+          const unsure = parseLowCategoryConfidence(cause);
+          if (!unsure) throw cause;
+          setCategoryPrompt({ ...unsure, imageUrl, season });
+        }
       }
+    } catch (cause: unknown) {
+      reportError(cause);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function confirmIngestion(category: string, season: string) {
+    if (!ingestionReview) return;
+    setBusy("wardrobe-upload");
+    try {
+      await submitItem(ingestionReview.imageUrl, season, category);
+      setIngestionReview(null);
     } catch (cause: unknown) {
       reportError(cause);
     } finally {
@@ -699,6 +729,7 @@ export default function App() {
           )}
 
           {screen === "wardrobe" && <WardrobeView items={items} favorites={wardrobeFavorites} busy={busy} onAdd={addItem} onDelete={deleteItem} usage={usage} categoryPrompt={categoryPrompt} onConfirmCategory={confirmCategory} onCancelCategory={() => setCategoryPrompt(null)} onWorn={markWorn} onSeasonChange={changeSeason} onToggleFavorite={(id) => toggleFavorite(id, "wardrobe")} />}
+          {ingestionReview && <WardrobeIngestionModal review={ingestionReview} busy={busy === "wardrobe-upload"} onConfirm={confirmIngestion} onCancel={() => setIngestionReview(null)} />}
           {screen === "outfits" && <OutfitsView items={items} itemsById={itemsById} outfits={outfits} favorites={outfitFavorites} scheduled={scheduled} today={today} busy={busy} onGenerate={generateLooks} onToggleFavorite={(id) => toggleFavorite(id, "outfit")} onSchedule={scheduleOutfit} />}
           {screen === "calendar" && <CalendarView anchor={monthAnchor} onMonthChange={setMonthAnchor} scheduled={scheduled} items={items} loading={loading} onSave={saveCalendarOutfit} onRemove={removeCalendarOutfit}  onRender={renderCalendarOutfit} />}
           {screen === "profile" && <ProfileView user={user} profile={profile} busy={busy} onAvatar={uploadAvatar} onNavigate={navigate} />}
@@ -743,6 +774,203 @@ function CategoryPrompt({ prompt, busy, onConfirm, onCancel }: {
   </section>;
 }
 
+function WardrobeIngestionModal({
+  review,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  review: {
+    imageUrl: string;
+    analysis: WardrobeAnalysisResponse;
+    selectedCategory: string;
+    selectedSeason: string;
+  };
+  busy: boolean;
+  onConfirm: (category: string, season: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [category, setCategory] = useState(review.selectedCategory);
+  const [season, setSeason] = useState(review.selectedSeason);
+  const { analysis, imageUrl } = review;
+  const cv = analysis.cv_diagnostics;
+  const quality = cv?.quality;
+  const rag = analysis.rag_analysis;
+  const styling = analysis.styling_insights;
+  const palette = analysis.kmeans_palette;
+
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="ingestion-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-header-titles">
+            <span className="eyebrow">AGENT D'INGESTION MULTIMODAL</span>
+            <h2>Analyse IA du vêtement</h2>
+            <p className="modal-sub">Validation Computer Vision, Deep Learning, Palette K-Means & RAG</p>
+          </div>
+          <button type="button" className="modal-close" onClick={onCancel} aria-label="Fermer">✕</button>
+        </div>
+
+        <div className="ingestion-grid">
+          {/* Left Column: Visual & Diagnostics */}
+          <div className="ingestion-col-left">
+            <div className="ingestion-preview-card">
+              <img src={imageUrl} alt="Vêtement analysé" className="ingestion-photo" />
+              {quality?.quality_score != null && (
+                <div className={`quality-badge ${quality.sharpness}`}>
+                  <span className="quality-icon">✦</span>
+                  <span>Qualité CV : <b>{quality.quality_score}%</b> · {quality.sharpness === "sharp" ? "Photo nette" : quality.sharpness === "acceptable" ? "Acceptable" : "Floue"}</span>
+                </div>
+              )}
+            </div>
+
+            {/* OpenCV Metrics */}
+            <div className="cv-metrics-card">
+              <h4>Diagnostics Computer Vision (OpenCV)</h4>
+              <div className="metrics-pills">
+                <span title="Variance du Laplacien pour détection de flou">Laplacian : <b>{quality?.laplacian_variance ?? "-"}</b></span>
+                <span>Luminosité : <b>{quality?.brightness ?? "-"}</b></span>
+                <span>Contraste : <b>{quality?.contrast ?? "-"}</b></span>
+                <span>Dimensions : <b>{cv?.dimensions?.width}×{cv?.dimensions?.height}</b></span>
+              </div>
+              {quality?.warnings && quality.warnings.length > 0 && (
+                <div className="cv-warnings-list">
+                  {quality.warnings.map((w: string, i: number) => (
+                    <p key={i} className="cv-warning-item">ℹ️ {w}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* K-Means Color Palette */}
+            {palette && palette.length > 0 && (
+              <div className="kmeans-palette-card">
+                <h4>Palette extraite par K-Means</h4>
+                <div className="kmeans-swatches-grid">
+                  {palette.map((p, idx) => (
+                    <div key={idx} className="kmeans-swatch-item">
+                      <span className="kmeans-swatch-circle" style={{ backgroundColor: p.hex }} />
+                      <div className="kmeans-swatch-info">
+                        <strong>{p.label}</strong>
+                        <small>{p.hex} · {p.percentage}%</small>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right Column: Classification, RAG & Styling */}
+          <div className="ingestion-col-right">
+            {/* Duplicate Alert if RAG found similar */}
+            {rag?.duplicate_warning && (
+              <div className="rag-duplicate-alert">
+                <span className="alert-icon">⚠️</span>
+                <div>
+                  <strong>Alerte Doublon RAG</strong>
+                  <p>{rag.duplicate_warning}</p>
+                  {rag.similar_items?.[0] && (
+                    <div className="duplicate-thumb-row">
+                      <img src={rag.similar_items[0].image_url} alt="Pièce similaire" className="duplicate-thumb" />
+                      <span>{rag.similar_items[0].similarity}% similaire avec votre {categoryLabel(rag.similar_items[0].category)} existant</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Attributes Confirmation */}
+            <div className="attributes-config-card">
+              <h4>Classification & Confirmation</h4>
+              <div className="form-row">
+                <label className="field-group">
+                  <span>Catégorie {analysis.confidence?.category ? <small className="conf-pill">{(analysis.confidence.category * 100).toFixed(0)}% confiance</small> : null}</span>
+                  <select value={category} onChange={(e) => setCategory(e.target.value)}>
+                    {WARDROBE_CATEGORIES.map(([val, label]) => (
+                      <option key={val} value={val}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field-group">
+                  <span>Saison de la pièce</span>
+                  <select value={season} onChange={(e) => setSeason(e.target.value)}>
+                    <option value="toutes_saisons">Toutes saisons</option>
+                    {ITEM_SEASONS.map(([val, label]) => (
+                      <option key={val} value={val}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="detected-tags-row">
+                {analysis.style && <span className="style-pill">✧ Style : <b>{categoryLabel(analysis.style)}</b></span>}
+                {analysis.pattern && <span className="style-pill">▦ Motif : <b>{categoryLabel(analysis.pattern)}</b></span>}
+                {analysis.colors && analysis.colors.length > 0 && (
+                  <span className="style-pill">● Couleurs : <b>{analysis.colors.map(categoryLabel).join(", ")}</b></span>
+                )}
+              </div>
+            </div>
+
+            {/* RAG Complementary Pairings */}
+            {rag?.recommended_pairings && rag.recommended_pairings.length > 0 && (
+              <div className="rag-pairings-card">
+                <h4>✦ Looks possibles avec ton dressing (RAG)</h4>
+                <div className="pairings-scroll">
+                  {rag.recommended_pairings.map((pair, i) => (
+                    <div key={i} className="pairing-card">
+                      <img src={pair.image_url} alt={pair.category} />
+                      <div className="pairing-info">
+                        <strong>{categoryLabel(pair.category)}</strong>
+                        <small>{pair.colors?.map(categoryLabel).join(", ") || pair.style || "Dressing"}</small>
+                        <span className="harmony-badge">Harmonie : {(pair.score * 100).toFixed(0)}%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Styling Insights */}
+            {styling?.editorial_advice && (
+              <div className="styling-insights-card">
+                <h4>✨ Note du Styliste IA</h4>
+                <p className="editorial-text">{styling.editorial_advice}</p>
+                {styling.recommended_occasions && styling.recommended_occasions.length > 0 && (
+                  <div className="occasions-chips">
+                    {styling.recommended_occasions.map((occ, i) => (
+                      <span key={i} className="occasion-chip">📍 {occ}</span>
+                    ))}
+                  </div>
+                )}
+                {styling.care_tip && (
+                  <p className="care-tip-text">🧼 <b>Conseil d'entretien :</b> {styling.care_tip}</p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="modal-footer">
+          <button type="button" className="button button-outline" onClick={onCancel} disabled={busy}>
+            Annuler
+          </button>
+          <button
+            type="button"
+            className="button button-primary"
+            onClick={() => void onConfirm(category, season)}
+            disabled={busy}
+          >
+            {busy ? "Enregistrement…" : "✓ Confirmer et ajouter au dressing"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function WardrobeView({ items, favorites, busy, usage, categoryPrompt, onConfirmCategory, onCancelCategory, onAdd, onDelete, onWorn, onSeasonChange, onToggleFavorite }: {
   items: ClothingItem[];
   favorites: string[];
@@ -773,7 +1001,24 @@ function WardrobeView({ items, favorites, busy, usage, categoryPrompt, onConfirm
     <PageHeading title="Mon dressing" subtitle="Ajoute, retrouve et organise les pièces que tu aimes porter." action={<label className={`button button-primary file-button${busy === "wardrobe-upload" ? " is-disabled" : ""}`}>＋ {busy === "wardrobe-upload" ? "Analyse en cours…" : "Ajouter une pièce"}<input type="file" accept="image/*" disabled={busy === "wardrobe-upload"} onChange={(event) => { const file = event.target.files?.[0]; if (file) void onAdd(file, season); event.target.value = ""; }} /></label>} />
     {categoryPrompt && <CategoryPrompt prompt={categoryPrompt} busy={busy === "wardrobe-upload"} onConfirm={onConfirmCategory} onCancel={onCancelCategory} />}<div className="wardrobe-toolbar"><label className="search-field"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Chercher une couleur, un style…" /></label><label className="filter-select"><span>Catégorie</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="toutes">Toutes</option>{categories.map((value) => <option key={value} value={value}>{categoryLabel(value)}</option>)}</select></label><button type="button" className={`filter-favorite${favoritesOnly ? " is-selected" : ""}`} aria-pressed={favoritesOnly} onClick={() => setFavoritesOnly((current) => !current)}>♡ Favoris</button><label className="season-select"><span>Saison de la pièce (facultatif)</span><select value={season} onChange={(event) => setSeason(event.target.value)}><option value="">Non précisée</option>{ITEM_SEASONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
     <div className="results-line"><span><b>{filtered.length}</b> pièce{filtered.length === 1 ? "" : "s"} {favoritesOnly ? "dans tes favoris" : "dans ton dressing"}{items.some((item) => item.season_source === "vision" || !item.season) && <span className="confirm-badge">{items.filter((item) => item.season_source === "vision" || !item.season).length} à confirmer</span>}</span><span>Ajoute une photo nette d’une seule pièce pour une meilleure analyse.</span></div>
-    {filtered.length === 0 ? <EmptyState icon={items.length === 0 ? "◈" : "⌕"} title={items.length === 0 ? "Ton dressing commence ici" : "Aucune pièce trouvée"} text={items.length === 0 ? "Ajoute une photo de vêtement : DressMe identifiera sa catégorie, ses couleurs et son style." : "Essaie d’ajuster ta recherche ou tes filtres."} /> : <div className="clothing-grid">{filtered.map((item) => <article className="clothing-card" key={item.id}><div className="clothing-photo"><img src={item.image_url} alt={categoryLabel(item.category)} loading="lazy" /><button type="button" className={`favorite-toggle${favorites.includes(item.id) ? " is-favorite" : ""}`} aria-label={favorites.includes(item.id) ? "Retirer des favoris" : "Ajouter aux favoris"} aria-pressed={favorites.includes(item.id)} onClick={() => onToggleFavorite(item.id)}>{favorites.includes(item.id) ? "♥" : "♡"}</button></div><div className="clothing-info"><span className="category-pill">{categoryLabel(item.category)}</span><h3>{item.style ? categoryLabel(item.style) : "Pièce de mon dressing"}</h3><p>{[...(item.colors ?? []), item.pattern].filter(Boolean).map(categoryLabel).join(" · ") || "Style à découvrir"}</p><label className="season-picker"><select aria-label="Saison de la pièce" value={item.season ?? ""} onChange={(event) => { if (event.target.value) void onSeasonChange(item, event.target.value); }}><option value="" disabled>Saison ?</option>{ITEM_SEASONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>{(item.season_source === "vision" || !item.season) && <span className="confirm-badge">À confirmer</span>}</label><p className="usage-line">{usage[item.id] ? `Porté ${usage[item.id].wear_count}× · dernière fois le ${new Date(usage[item.id].last_worn).toLocaleDateString("fr-FR")}` : "Jamais porté"} <button type="button" className="worn-button" onClick={() => void onWorn(item)}>Je l’ai porté</button></p><button type="button" className="remove-link" onClick={() => void onDelete(item)}>Retirer du dressing</button></div></article>)}</div>}
+    {filtered.length === 0 ? <EmptyState icon={items.length === 0 ? "◈" : "⌕"} title={items.length === 0 ? "Ton dressing commence ici" : "Aucune pièce trouvée"} text={items.length === 0 ? "Ajoute une photo de vêtement : DressMe identifiera sa catégorie, ses couleurs et son style." : "Essaie d’ajuster ta recherche ou tes filtres."} /> : <div className="clothing-grid">{filtered.map((item) => {
+      const palette = (item.attribute_confidence as any)?.kmeans_palette;
+      const cvDiag = (item.attribute_confidence as any)?.cv_diagnostics;
+      const ragAnalysis = (item.attribute_confidence as any)?.rag_analysis;
+      const styling = (item.attribute_confidence as any)?.styling_insights;
+      return <article className="clothing-card" key={item.id}><div className="clothing-photo"><img src={item.image_url} alt={categoryLabel(item.category)} loading="lazy" /><button type="button" className={`favorite-toggle${favorites.includes(item.id) ? " is-favorite" : ""}`} aria-label={favorites.includes(item.id) ? "Retirer des favoris" : "Ajouter aux favoris"} aria-pressed={favorites.includes(item.id)} onClick={() => onToggleFavorite(item.id)}>{favorites.includes(item.id) ? "♥" : "♡"}</button></div><div className="clothing-info"><span className="category-pill">{categoryLabel(item.category)}</span><h3>{item.style ? categoryLabel(item.style) : "Pièce de mon dressing"}</h3><p>{[...(item.colors ?? []), item.pattern].filter(Boolean).map(categoryLabel).join(" · ") || "Style à découvrir"}</p>
+      {Array.isArray(palette) && palette.length > 0 && <div style={{ display: "flex", gap: "5px", margin: "6px 0", alignItems: "center", flexWrap: "wrap" }}>
+        {palette.map((p: any, i: number) => <span key={i} title={`${p.label} (${p.percentage}%)`} style={{ width: "13px", height: "13px", borderRadius: "50%", backgroundColor: p.hex, border: "1px solid rgba(0,0,0,0.2)", display: "inline-block" }} />)}
+        <small style={{ fontSize: "11px", color: "var(--color-muted)", marginLeft: "2px" }}>K-Means</small>
+      </div>}
+      {styling?.editorial_advice && <details className="outfit-explanation" style={{ marginTop: "6px", marginBottom: "6px", fontSize: "12px" }}><summary style={{ cursor: "pointer", color: "#6366f1", fontWeight: 600 }}>✦ Analyse IA & RAG</summary><div style={{ marginTop: "4px", lineHeight: "1.4", padding: "6px", background: "var(--color-surface, #f8fafc)", borderRadius: "6px" }}>
+        {cvDiag?.quality?.sharpness && <p style={{ margin: "2px 0", color: "#10b981", fontSize: "11px" }}>✓ OpenCV : netteté {cvDiag.quality.sharpness}</p>}
+        {ragAnalysis?.duplicate_warning && <p style={{ margin: "4px 0", color: "#b45309", background: "#fef3c7", padding: "4px 6px", borderRadius: "4px", fontSize: "11px" }}>⚠️ {ragAnalysis.duplicate_warning}</p>}
+        <p style={{ whiteSpace: "pre-line", margin: "4px 0", fontSize: "11px" }}>{styling.editorial_advice}</p>
+        {styling.care_tip && <p style={{ margin: "4px 0 0", color: "#64748b", fontSize: "11px" }}>🧼 {styling.care_tip}</p>}
+      </div></details>}
+      <label className="season-picker"><select aria-label="Saison de la pièce" value={item.season ?? ""} onChange={(event) => { if (event.target.value) void onSeasonChange(item, event.target.value); }}><option value="" disabled>Saison ?</option>{ITEM_SEASONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>{(item.season_source === "vision" || !item.season) && <span className="confirm-badge">À confirmer</span>}</label><p className="usage-line">{usage[item.id] ? `Porté ${usage[item.id].wear_count}× · dernière fois le ${new Date(usage[item.id].last_worn).toLocaleDateString("fr-FR")}` : "Jamais porté"} <button type="button" className="worn-button" onClick={() => void onWorn(item)}>Je l’ai porté</button></p><button type="button" className="remove-link" onClick={() => void onDelete(item)}>Retirer du dressing</button></div></article>;
+    })}</div>}
   </>;
 }
 

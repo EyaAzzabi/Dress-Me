@@ -49,3 +49,9 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Database and local state
+*.db
+*.sqlite
+uploads/
+backend/uploads/

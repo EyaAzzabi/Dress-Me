@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.metadata_agent import MetadataAgent
 from app.agents.vision_agent import VisionAgent
+from app.agents.wardrobe_ingestion_agent import WardrobeIngestionAgent
 from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.clothing_item import ClothingItem
@@ -15,13 +16,31 @@ from app.schemas.clothing_item import (
     ClothingItemRead,
     ClothingItemUpdate,
     ItemUsage,
+    WardrobeAnalysisPayload,
+    WardrobeAnalysisResponse,
     WornPayload,
 )
 from app.services.storage import StorageService
 
 router = APIRouter(prefix="/wardrobe", tags=["wardrobe"])
-vision_agent = VisionAgent()
 storage_service = StorageService()
+vision_agent = VisionAgent()
+
+
+@router.post("/analyze", response_model=WardrobeAnalysisResponse)
+def analyze_photo(
+    payload: WardrobeAnalysisPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Multimodal analysis: Computer Vision (OpenCV blur & quality), K-Means color palette,
+    FashionCLIP ViT-B/32 multimodal zero-shot classification, RAG duplicate check and outfit pairing."""
+    agent = WardrobeIngestionAgent(db=db, vision_agent=vision_agent)
+    try:
+        results = agent.run(image_url=payload.image_url, user_id=current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return results
 
 
 @router.post("/upload")
@@ -71,8 +90,9 @@ def add_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ClothingItem:
+    agent = WardrobeIngestionAgent(db=db, vision_agent=vision_agent)
     try:
-        attributes = vision_agent.run(image_url=payload.image_url)
+        attributes = agent.run(image_url=payload.image_url, user_id=current_user.id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if attributes["category"] == "hors_perimetre":
