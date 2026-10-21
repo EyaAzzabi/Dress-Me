@@ -297,7 +297,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.85)",
     overflow: "hidden",
   },
-  thumbFill: { ...StyleSheet.absoluteFillObject },
+  thumbFill: { ...StyleSheet.absoluteFill },
   collage: { flexDirection: "row", flexWrap: "wrap", backgroundColor: "#F1ECEB" },
   collageImage: { width: "50%", height: "50%" },
   avatarRender: { width: "100%", height: 360, borderRadius: radius.md, backgroundColor: "#FAF7F5" },

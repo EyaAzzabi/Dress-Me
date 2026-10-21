@@ -13,6 +13,8 @@ Create Date: 2026-10-10 18:00:00.000000
 from typing import Sequence, Union
 
 from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = 'd2f7a9c31e58'
@@ -34,7 +36,14 @@ def upgrade() -> None:
     """Upgrade schema."""
     if op.get_bind().dialect.name != "postgresql":
         return  # other databases never had native arrays
-    for table, column, _ in COLUMNS:
+    for table, column, array_type in COLUMNS:
+        current_type = next(
+            item["type"]
+            for item in sa.inspect(op.get_bind()).get_columns(table)
+            if item["name"] == column
+        )
+        if not isinstance(current_type, postgresql.ARRAY):
+            continue
         # to_json(NULL) is NULL, and to_json(uuid[]) gives ["…","…"] — exactly what the
         # models' JSON type decorators read back.
         op.execute(f'ALTER TABLE {table} ALTER COLUMN {column} TYPE text USING to_json({column})::text')
@@ -52,6 +61,13 @@ def downgrade() -> None:
         "ELSE ARRAY(SELECT json_array_elements_text(t::json)) END $$ LANGUAGE sql IMMUTABLE"
     )
     for table, column, array_type in COLUMNS:
+        current_type = next(
+            item["type"]
+            for item in sa.inspect(op.get_bind()).get_columns(table)
+            if item["name"] == column
+        )
+        if not isinstance(current_type, sa.Text):
+            continue
         op.execute(
             f"ALTER TABLE {table} ALTER COLUMN {column} TYPE {array_type} "
             f"USING pg_temp.json_text_to_array({column})::{array_type}"
