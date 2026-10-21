@@ -12,6 +12,7 @@ from app.agents.purchase_agent import PurchaseAgent
 from app.agents.recommendation_agent import RecommendationAgent
 from app.agents.style_profile_agent import StyleProfileAgent
 from app.agents.vision_agent import VisionAgent
+from app.agents.wardrobe_ingestion_agent import WardrobeIngestionAgent
 from app.db import vector_store
 from app.ml import clothing_gate
 from app.models.outfit import Outfit
@@ -31,6 +32,7 @@ class AgentOrchestrator:
     def __init__(self, db: Session):
         self.db = db
         self.vision_agent = VisionAgent()
+        self.wardrobe_ingestion_agent = WardrobeIngestionAgent(db)
         self.metadata_agent = MetadataAgent(db)
         self.style_profile_agent = StyleProfileAgent(db)
         self.context_agent = ContextAgent()

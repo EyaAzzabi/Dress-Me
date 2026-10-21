@@ -92,6 +92,11 @@ class MetadataAgent(BaseAgent):
         vector_store.upsert_item_embedding(
             item_id, attributes["embedding"], owner_id=user_id, category=attributes["category"]
         )
+        confidence_payload = dict(attributes.get("confidence") or {})
+        for extra_key in ["kmeans_palette", "cv_diagnostics", "rag_analysis", "styling_insights"]:
+            if extra_key in attributes and attributes[extra_key]:
+                confidence_payload[extra_key] = attributes[extra_key]
+
         suggested = attributes.get("season")
         item = ClothingItem(
             id=item_id,
@@ -103,8 +108,8 @@ class MetadataAgent(BaseAgent):
             pattern=attributes["pattern"],
             season=season or suggested,
             season_source="user" if season else ("vision" if suggested else None),
-            attribute_confidence=attributes.get("confidence"),
-            embedding_id=str(item_id) if vector_store.is_configured() else None,
+            attribute_confidence=confidence_payload,
+            embedding_id=str(item_id),
         )
         self.db.add(item)
         self.db.commit()
