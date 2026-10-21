@@ -4,10 +4,11 @@ from typing import Any
 import numpy as np
 
 from app.agents.base import BaseAgent
-from app.ml import compatibility_model, purchase_calibration
+from app.ml import compatibility_model, purchase_calibration, purchase_llm
 from app.models.clothing_item import ClothingItem
 from app.services.catalog_index import CatalogIndex
 from app.services.ecommerce import EcommerceService
+from app.services.purchase_tools import PurchaseToolSandbox
 
 # Cosine similarity between FashionCLIP embeddings of the same category. On the
 # catalog, a random same-category pair is above 0.79 only 1 % of the time.
@@ -76,6 +77,10 @@ class PurchaseAgent(BaseAgent):
     the Tunisian catalog (linked to their page on the brand's site), and the Tunisian
     brands whose products look closest to the piece and to the wardrobe's style.
 
+    Catalog / wardrobe / price lookups go through PurchaseToolSandbox. A LoRA-adapted
+    Qwen2.5-1.5B is fine-tuned to *call those tools itself* (tool-calling loop), then
+    write the explanation from the tool results — see app/ml/purchase_llm.py.
+
     Never persists the candidate's embedding — it isn't owned yet.
     """
 
@@ -84,6 +89,7 @@ class PurchaseAgent(BaseAgent):
     def __init__(self) -> None:
         self.catalog_index = CatalogIndex()
         self.ecommerce_service = EcommerceService()
+        self.tools = PurchaseToolSandbox(catalog=self.catalog_index, ecommerce=self.ecommerce_service)
 
     def run(
         self,
@@ -114,6 +120,7 @@ class PurchaseAgent(BaseAgent):
 
         duplicates = _find_duplicates(candidate, category, owned)
         outfits = _unlocked_outfits(candidate, category, owned)
+        self.tools.bind(embedding=candidate, category=category, owned=owned, price=price, item=item_summary)
         neighbours = self.catalog_index.search(candidate, category=category, limit=PRICE_NEIGHBOURS)
         price_insight = _price_insight(price, neighbours)
 
@@ -144,7 +151,7 @@ class PurchaseAgent(BaseAgent):
         else:
             verdict = "not_recommended"
 
-        return {
+        result = {
             "verdict": verdict,
             "score": score,
             "compatibility_score": round(score / 100, 2),
@@ -159,7 +166,17 @@ class PurchaseAgent(BaseAgent):
             "cost_per_wear": _cost_per_wear(price, category, versatility, is_duplicate),
             "catalog_alternatives": self._alternatives(candidate, item_summary, neighbours, price),
             "tunisian_brands": self._brands(candidate, category, owned),
+            "llm": None,
         }
+        llm = purchase_llm.run_agent(
+            {"category": category, "color": item_summary["color"], "price": price,
+             "wardrobe_size": len(owned)},
+            self.tools,
+        )
+        if llm:
+            result["explanation"] = llm["text"]
+            result["llm"] = {"source": llm["source"], "model": llm["model"], "tools": llm["tools"]}
+        return result
 
     def _brands(self, candidate, category, owned) -> list[dict]:
         query = candidate
@@ -189,6 +206,7 @@ def _empty_result(item_summary: dict) -> dict:
         "score": 0, "compatibility_score": 0.0, "item": item_summary, "factors": [],
         "outfits_unlocked": 0, "outfit_examples": [], "duplicates": [], "similar_item_ids": [],
         "price_insight": None, "cost_per_wear": None, "catalog_alternatives": [], "tunisian_brands": [],
+        "llm": None,
     }
 
 

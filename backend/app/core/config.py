@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # be set explicitly for that provider). See app/agents/llm_agent.py.
     llm_base_url: str | None = None
     llm_model: str | None = None
+    # Purchase-only: when true, the agent may replace the template explanation with
+    # a LoRA-adapted Qwen2.5-1.5B (if the adapter is on disk) or the same prompt
+    # via LLM_PROVIDER. Scores and tools stay deterministic either way.
+    purchase_llm_enabled: bool = True
 
     # Virtual try-on (TryOnAgent) via Replicate's hosted API — no local GPU needed.
     # replicate_tryon_model_version has no safe hardcoded default: Replicate model

@@ -138,6 +138,7 @@ class PurchaseCheckResult(BaseModel):
     cost_per_wear: CostPerWear | None = None
     catalog_alternatives: list[CatalogAlternative] = []
     tunisian_brands: list[BrandRecommendation] = []
+    llm: dict | None = None  # {source, model} when the Purchase LLM rewrote the explanation
 
 
 class ProductVariant(BaseModel):
