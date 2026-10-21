@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
     llm_model: str | None = None
 
+    # RecommendationAgent enrichment kill-switches (3 axes: fine-tuning ranking,
+    # contextual RAG, prompt engineering + LLM). Default ON so the enriched path is
+    # used when artifacts/data are present; flip to false to force the exact legacy
+    # heuristic (ranking) or skip RAG retrieval (contextual_rag) without redeploying.
+    # The test conftest forces both off so existing tests run the fallback path.
+    ranking_enabled: bool = True
+    contextual_rag_enabled: bool = True
+
     # Virtual try-on (TryOnAgent) via Replicate's hosted API — no local GPU needed.
     # replicate_tryon_model_version has no safe hardcoded default: Replicate model
     # version ids change over time and can't be verified without an account, so it's
