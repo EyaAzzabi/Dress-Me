@@ -144,7 +144,8 @@ class MetadataAgent(BaseAgent):
         item = self.get_item(user_id=user_id, item_id=item_id)
         if item is None:
             return False
-        vector_store.delete_item_embedding(item.id)
+        if item.embedding_id:
+            vector_store.delete_item_embedding(item.id)
         self.db.query(WearLog).filter(WearLog.item_id == item.id).delete()
         self.db.delete(item)
         self.db.commit()

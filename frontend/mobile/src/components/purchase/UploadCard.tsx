@@ -87,7 +87,7 @@ const styles = StyleSheet.create({
   hint: { fontSize: 12, lineHeight: 16 },
   thumb: { width: 84, height: 84, borderRadius: radius.md, backgroundColor: "#FFFFFF" },
   thumbOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: radius.md,
     backgroundColor: "rgba(26,10,20,0.5)",
     alignItems: "center",

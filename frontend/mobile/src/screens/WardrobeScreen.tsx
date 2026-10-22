@@ -126,6 +126,7 @@ export default function WardrobeScreen() {
   const [seasonTarget, setSeasonTarget] = useState<ClothingItem | null>(null);
   const [usage, setUsage] = useState<Record<string, ItemUsage>>({});
   const [categoryPrompt, setCategoryPrompt] = useState<CategoryPrompt | null>(null);
+  const [imageSourcePickerVisible, setImageSourcePickerVisible] = useState(false);
 
   const reload = useCallback(async () => {
     const nextItems = await listWardrobeItems();
@@ -193,16 +194,33 @@ export default function WardrobeScreen() {
   }
 
   async function handleAdd() {
+    setImageSourcePickerVisible(true);
+  }
+
+  async function chooseImageSource(source: "camera" | "library") {
+    setImageSourcePickerVisible(false);
+    setAdding(true);
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const permission = source === "camera"
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        notify("Accès aux photos requis", "Autorise DressMe à accéder à ta galerie pour ajouter une pièce.");
+        notify(
+          source === "camera" ? "Accès à la caméra requis" : "Accès aux photos requis",
+          source === "camera"
+            ? "Autorise DressMe à utiliser la caméra pour photographier une pièce."
+            : "Autorise DressMe à accéder à ta galerie pour ajouter une pièce."
+        );
         return;
       }
-      const picture = await ImagePicker.launchImageLibraryAsync({ quality: 0.85 });
+      const options = { mediaTypes: ["images" as const], quality: 0.85 };
+      const picture = source === "camera"
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync(options);
       if (picture.canceled) return;
-      setAdding(true);
-      await submitNewItem(await uploadPhoto(picture.assets[0].uri));
+      const photo = picture.assets[0];
+      if (!photo) return;
+      await submitNewItem(await uploadPhoto(photo.uri));
     } catch (error: unknown) {
       notify("Impossible d'ajouter", getErrorMessage(error));
     } finally {
@@ -539,6 +557,49 @@ export default function WardrobeScreen() {
         )}
       </ScrollView>
 
+      <Modal
+        visible={imageSourcePickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setImageSourcePickerVisible(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setImageSourcePickerVisible(false)}>
+          <Pressable style={[styles.modalSheet, { backgroundColor: colors.surfaceElevated }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Ajouter une pièce</Text>
+            <Text style={[styles.modalHint, { color: colors.textMuted }]}>
+              Choisis une photo existante ou prends-en une maintenant.
+            </Text>
+            <Pressable
+              onPress={() => void chooseImageSource("camera")}
+              accessibilityRole="button"
+              style={[
+                styles.modalOption,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.modalOptionTxt, { color: colors.text }]}>📷  Prendre une photo</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => void chooseImageSource("library")}
+              accessibilityRole="button"
+              style={[
+                styles.modalOption,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.modalOptionTxt, { color: colors.text }]}>🖼️  Choisir dans la galerie</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setImageSourcePickerVisible(false)}
+              accessibilityRole="button"
+              style={styles.modalOption}
+            >
+              <Text style={[styles.modalOptionTxt, { color: colors.textMuted }]}>Annuler</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       <Modal visible={categoryPrompt !== null} transparent animationType="fade" onRequestClose={() => setCategoryPrompt(null)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setCategoryPrompt(null)}>
           <Pressable style={[styles.modalSheet, { backgroundColor: colors.surfaceElevated }]}>
@@ -793,7 +854,7 @@ const styles = StyleSheet.create({
   heartText: { fontSize: 17, fontWeight: "800" },
   deleteText: { fontSize: 14, lineHeight: 18 },
   removingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 2,
     alignItems: "center",
     justifyContent: "center",

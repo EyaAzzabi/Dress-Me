@@ -16,6 +16,7 @@ class _FakeUser:
 
 class _FakeItem:
     id = uuid.uuid4()
+    embedding_id = None
 
 
 class _FakeQuery:
@@ -61,6 +62,7 @@ def fake_db():
 
 
 def test_delete_wardrobe_item_accepts_uuid_path_parameter(fake_db, monkeypatch):
+    fake_db.query_result.item.embedding_id = str(fake_db.query_result.item.id)
     deleted_embeddings = []
     monkeypatch.setattr(
         "app.agents.metadata_agent.vector_store.delete_item_embedding",
@@ -73,6 +75,21 @@ def test_delete_wardrobe_item_accepts_uuid_path_parameter(fake_db, monkeypatch):
     assert fake_db.deleted is fake_db.query_result.item
     assert fake_db.committed
     assert deleted_embeddings == [fake_db.query_result.item.id]
+
+
+def test_delete_wardrobe_item_without_embedding_skips_vector_store(fake_db, monkeypatch):
+    deleted_embeddings = []
+    monkeypatch.setattr(
+        "app.agents.metadata_agent.vector_store.delete_item_embedding",
+        lambda item_id: deleted_embeddings.append(item_id),
+    )
+
+    response = client.delete(f"/api/v1/wardrobe/{_FakeItem.id}")
+
+    assert response.status_code == 204
+    assert fake_db.deleted is fake_db.query_result.item
+    assert fake_db.committed
+    assert deleted_embeddings == []
 
 
 def test_delete_wardrobe_item_rejects_invalid_uuid(fake_db):

@@ -128,7 +128,7 @@ const styles = StyleSheet.create({
     transform: [{ scale: 1.08 }],
   },
   photoTint: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(255, 230, 239, 0.12)",
   },
 

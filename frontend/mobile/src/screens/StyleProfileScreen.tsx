@@ -215,7 +215,7 @@ const styles = StyleSheet.create({
     position: "relative",
     paddingHorizontal: spacing.xl,
   },
-  heroTint: { ...StyleSheet.absoluteFillObject, opacity: 0.27 },
+  heroTint: { ...StyleSheet.absoluteFill, opacity: 0.27 },
   avatarWrapper: { position: "absolute", bottom: -44, alignSelf: "center", left: 0, right: 0, alignItems: "center" },
   avatarRing: {
     width: 90, height: 90, borderRadius: 45,
