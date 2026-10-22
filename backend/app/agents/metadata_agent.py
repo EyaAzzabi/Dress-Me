@@ -22,8 +22,10 @@ class MetadataAgent(BaseAgent):
 
     name = "metadata_agent"
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, storage: Any | None = None):
         self.db = db
+        # Only used for background removal; None lets that code use the default StorageService.
+        self.storage = storage
 
     def run(
         self,
@@ -77,10 +79,17 @@ class MetadataAgent(BaseAgent):
         attributes: dict[str, Any],
         season: str | None = None,
         category: str | None = None,
+        remove_bg: bool = False,
     ) -> ClothingItem:
         """Persists an item from the Vision Agent's output. A user-provided `season`
         wins over the model's suggestion; season_source records which one it was. A
         user-confirmed `category` likewise replaces the model's (and counts as certain)."""
+        if remove_bg:
+            # Imported here: the segmentation code pulls in heavy ML dependencies that
+            # ordinary uploads never need.
+            from app.ml import background_removal
+
+            image_url = background_removal.process_and_upload_clean_image(image_url, self.storage)
         if category is not None:
             attributes = {
                 **attributes,

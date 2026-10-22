@@ -53,6 +53,14 @@ class Settings(BaseSettings):
     llm_failure_ttl_seconds: float = Field(default=15, ge=0, le=300)
     llm_cache_max_entries: int = Field(default=512, ge=1, le=10000)
 
+    # RecommendationAgent enrichment kill-switches (3 axes: fine-tuning ranking,
+    # contextual RAG, prompt engineering + LLM). Default ON so the enriched path is
+    # used when artifacts/data are present; flip to false to force the exact legacy
+    # heuristic (ranking) or skip RAG retrieval (contextual_rag) without redeploying.
+    # The test conftest forces both off so existing tests run the fallback path.
+    ranking_enabled: bool = True
+    contextual_rag_enabled: bool = True
+
     # Virtual try-on (TryOnAgent) via Replicate's hosted API — no local GPU needed.
     # replicate_tryon_model_version has no safe hardcoded default: Replicate model
     # version ids change over time and can't be verified without an account, so it's
