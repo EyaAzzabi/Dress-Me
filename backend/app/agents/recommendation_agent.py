@@ -12,6 +12,7 @@ from app.db import vector_store
 from app.ml import compatibility_model, ranking_model
 from app.models.clothing_item import ClothingItem
 from app.services import occasions, seasons
+from app.services.outfit_constraints import filter_candidates_by_constraints
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +186,10 @@ class RecommendationAgent(BaseAgent):
 
         candidates.sort(key=lambda c: c[1], reverse=True)
         
-        # Diversify final selection: prefer outfits with different items
+        # Apply hard constraints: filter out outfits that violate occasion rules
+        candidates = filter_candidates_by_constraints(
+            candidates, occasion_category, formality
+        )
         diverse_outfits = []
         used_items = set()
         
