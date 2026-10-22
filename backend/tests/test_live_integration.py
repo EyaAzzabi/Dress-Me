@@ -35,10 +35,22 @@ def _postgres_reachable() -> bool:
         return False
 
 
+def _app_database_is_local() -> bool:
+    """The app under test uses backend/.env's DATABASE_URL, but the teardown below cleans up
+    through the hardcoded localhost URL. If .env points at a remote database (e.g. the team's
+    Supabase), these tests would create users/items there and never delete them."""
+    from sqlalchemy.engine import make_url
+
+    from app.core.config import get_settings
+
+    return make_url(get_settings().database_url).host in {"localhost", "127.0.0.1"}
+
+
 pytestmark = pytest.mark.skipif(
-    not _postgres_reachable(),
-    reason="No live Postgres at localhost:5432 — run `docker compose up -d postgres` "
-           "+ `alembic upgrade head` in backend/ to enable this test.",
+    not (_postgres_reachable() and _app_database_is_local()),
+    reason="Needs the local docker Postgres (`docker compose up -d postgres` + `alembic upgrade head`) "
+           "AND backend/.env's DATABASE_URL pointing at it — these tests create and delete real users, "
+           "so they never run against a remote database.",
 )
 
 
