@@ -1,0 +1,615 @@
+{
+ "seasons": [
+  "ete",
+  "hiver",
+  "mi_saison"
+ ],
+ "usages": [
+  "Casual",
+  "Sports",
+  "Ethnic",
+  "Formal"
+ ],
+ "types": [
+  {
+   "article_type": "Tshirts",
+   "prompt": "a t-shirt",
+   "season": [
+    0.4853,
+    0.0418,
+    0.4729
+   ],
+   "usage": [
+    0.4778,
+    0.5185,
+    0.0007,
+    0.0029
+   ]
+  },
+  {
+   "article_type": "Shirts",
+   "prompt": "a button-up shirt",
+   "season": [
+    0.291,
+    0.0576,
+    0.6513
+   ],
+   "usage": [
+    0.1754,
+    0.0005,
+    0.01,
+    0.8141
+   ]
+  },
+  {
+   "article_type": "Tops",
+   "prompt": "a women's top",
+   "season": [
+    0.5962,
+    0.0442,
+    0.3596
+   ],
+   "usage": [
+    0.7444,
+    0.0395,
+    0.1944,
+    0.0217
+   ]
+  },
+  {
+   "article_type": "Kurtas",
+   "prompt": "a kurta",
+   "season": [
+    0.5022,
+    0.0047,
+    0.4931
+   ],
+   "usage": [
+    0.0005,
+    0.0004,
+    0.9984,
+    0.0007
+   ]
+  },
+  {
+   "article_type": "Kurtis",
+   "prompt": "a kurti",
+   "season": [
+    0.5338,
+    0.0124,
+    0.4537
+   ],
+   "usage": [
+    0.0013,
+    0.0031,
+    0.99,
+    0.0056
+   ]
+  },
+  {
+   "article_type": "Tunics",
+   "prompt": "a tunic",
+   "season": [
+    0.65,
+    0.0134,
+    0.3366
+   ],
+   "usage": [
+    0.4168,
+    0.0142,
+    0.5435,
+    0.0255
+   ]
+  },
+  {
+   "article_type": "Sweatshirts",
+   "prompt": "a sweatshirt",
+   "season": [
+    0.0597,
+    0.0387,
+    0.9015
+   ],
+   "usage": [
+    0.4878,
+    0.4699,
+    0.0183,
+    0.024
+   ]
+  },
+  {
+   "article_type": "Sweaters",
+   "prompt": "a knitted sweater",
+   "season": [
+    0.0483,
+    0.1067,
+    0.845
+   ],
+   "usage": [
+    0.7621,
+    0.1762,
+    0.0267,
+    0.035
+   ]
+  },
+  {
+   "article_type": "Jackets",
+   "prompt": "a jacket",
+   "season": [
+    0.2613,
+    0.0759,
+    0.6627
+   ],
+   "usage": [
+    0.2425,
+    0.7156,
+    0.0253,
+    0.0166
+   ]
+  },
+  {
+   "article_type": "Innerwear Vests",
+   "prompt": "a sleeveless undershirt",
+   "season": [
+    0.7168,
+    0.2615,
+    0.0217
+   ],
+   "usage": [
+    0.8941,
+    0.0255,
+    0.0348,
+    0.0456
+   ]
+  },
+  {
+   "article_type": "Jeans",
+   "prompt": "a pair of jeans",
+   "season": [
+    0.4353,
+    0.1098,
+    0.4549
+   ],
+   "usage": [
+    0.9549,
+    0.0109,
+    0.0148,
+    0.0194
+   ]
+  },
+  {
+   "article_type": "Shorts",
+   "prompt": "a pair of shorts",
+   "season": [
+    0.4794,
+    0.129,
+    0.3916
+   ],
+   "usage": [
+    0.2087,
+    0.7785,
+    0.0055,
+    0.0072
+   ]
+  },
+  {
+   "article_type": "Trousers",
+   "prompt": "a pair of trousers",
+   "season": [
+    0.4024,
+    0.0558,
+    0.5418
+   ],
+   "usage": [
+    0.0875,
+    0.0021,
+    0.0172,
+    0.8931
+   ]
+  },
+  {
+   "article_type": "Track Pants",
+   "prompt": "a pair of track pants",
+   "season": [
+    0.3554,
+    0.0516,
+    0.593
+   ],
+   "usage": [
+    0.0797,
+    0.9053,
+    0.0065,
+    0.0085
+   ]
+  },
+  {
+   "article_type": "Leggings",
+   "prompt": "leggings",
+   "season": [
+    0.3883,
+    0.1567,
+    0.455
+   ],
+   "usage": [
+    0.3152,
+    0.0298,
+    0.6284,
+    0.0266
+   ]
+  },
+  {
+   "article_type": "Capris",
+   "prompt": "capri pants",
+   "season": [
+    0.6189,
+    0.0999,
+    0.2811
+   ],
+   "usage": [
+    0.2487,
+    0.6709,
+    0.056,
+    0.0245
+   ]
+  },
+  {
+   "article_type": "Skirts",
+   "prompt": "a skirt",
+   "season": [
+    0.6078,
+    0.046,
+    0.3463
+   ],
+   "usage": [
+    0.2333,
+    0.0971,
+    0.2646,
+    0.405
+   ]
+  },
+  {
+   "article_type": "Dresses",
+   "prompt": "a dress",
+   "season": [
+    0.5574,
+    0.0867,
+    0.356
+   ],
+   "usage": [
+    0.8921,
+    0.014,
+    0.019,
+    0.0749
+   ]
+  },
+  {
+   "article_type": "Sarees",
+   "prompt": "a saree",
+   "season": [
+    0.2132,
+    0.0116,
+    0.7752
+   ],
+   "usage": [
+    0.0002,
+    0.0017,
+    0.995,
+    0.003
+   ]
+  },
+  {
+   "article_type": "Casual Shoes",
+   "prompt": "casual shoes",
+   "season": [
+    0.3066,
+    0.333,
+    0.3605
+   ],
+   "usage": [
+    0.9078,
+    0.0291,
+    0.0031,
+    0.06
+   ]
+  },
+  {
+   "article_type": "Sports Shoes",
+   "prompt": "sports shoes",
+   "season": [
+    0.4605,
+    0.0182,
+    0.5212
+   ],
+   "usage": [
+    0.0029,
+    0.9955,
+    0.0007,
+    0.0009
+   ]
+  },
+  {
+   "article_type": "Formal Shoes",
+   "prompt": "formal leather shoes",
+   "season": [
+    0.2365,
+    0.4831,
+    0.2804
+   ],
+   "usage": [
+    0.0029,
+    0.0009,
+    0.0012,
+    0.9949
+   ]
+  },
+  {
+   "article_type": "Heels",
+   "prompt": "high heels",
+   "season": [
+    0.0525,
+    0.9109,
+    0.0366
+   ],
+   "usage": [
+    0.7592,
+    0.0041,
+    0.0613,
+    0.1754
+   ]
+  },
+  {
+   "article_type": "Flats",
+   "prompt": "flat shoes",
+   "season": [
+    0.064,
+    0.8264,
+    0.1096
+   ],
+   "usage": [
+    0.7316,
+    0.0314,
+    0.1996,
+    0.0374
+   ]
+  },
+  {
+   "article_type": "Sandals",
+   "prompt": "sandals",
+   "season": [
+    0.3174,
+    0.3091,
+    0.3735
+   ],
+   "usage": [
+    0.8015,
+    0.0762,
+    0.0087,
+    0.1136
+   ]
+  },
+  {
+   "article_type": "Flip Flops",
+   "prompt": "flip flops",
+   "season": [
+    0.3143,
+    0.3539,
+    0.3318
+   ],
+   "usage": [
+    0.9215,
+    0.0563,
+    0.0096,
+    0.0126
+   ]
+  },
+  {
+   "article_type": "Handbags",
+   "prompt": "a handbag",
+   "season": [
+    0.2829,
+    0.6589,
+    0.0582
+   ],
+   "usage": [
+    0.9498,
+    0.0264,
+    0.0103,
+    0.0135
+   ]
+  },
+  {
+   "article_type": "Backpacks",
+   "prompt": "a backpack",
+   "season": [
+    0.2684,
+    0.5117,
+    0.2199
+   ],
+   "usage": [
+    0.5107,
+    0.4716,
+    0.0077,
+    0.01
+   ]
+  },
+  {
+   "article_type": "Clutches",
+   "prompt": "a clutch bag",
+   "season": [
+    0.3818,
+    0.5432,
+    0.075
+   ],
+   "usage": [
+    0.8335,
+    0.0202,
+    0.1102,
+    0.0361
+   ]
+  },
+  {
+   "article_type": "Wallets",
+   "prompt": "a wallet",
+   "season": [
+    0.2667,
+    0.6257,
+    0.1076
+   ],
+   "usage": [
+    0.6909,
+    0.0053,
+    0.0073,
+    0.2964
+   ]
+  },
+  {
+   "article_type": "Belts",
+   "prompt": "a belt",
+   "season": [
+    0.4153,
+    0.4389,
+    0.1458
+   ],
+   "usage": [
+    0.2812,
+    0.0029,
+    0.0039,
+    0.712
+   ]
+  },
+  {
+   "article_type": "Caps",
+   "prompt": "a cap",
+   "season": [
+    0.3629,
+    0.1256,
+    0.5115
+   ],
+   "usage": [
+    0.2757,
+    0.6955,
+    0.0125,
+    0.0164
+   ]
+  },
+  {
+   "article_type": "Scarves",
+   "prompt": "a scarf",
+   "season": [
+    0.3541,
+    0.3859,
+    0.2599
+   ],
+   "usage": [
+    0.8065,
+    0.0466,
+    0.0635,
+    0.0833
+   ]
+  },
+  {
+   "article_type": "Stoles",
+   "prompt": "a stole",
+   "season": [
+    0.7875,
+    0.0353,
+    0.1772
+   ],
+   "usage": [
+    0.0616,
+    0.0119,
+    0.9054,
+    0.0212
+   ]
+  },
+  {
+   "article_type": "Ties",
+   "prompt": "a necktie",
+   "season": [
+    0.7427,
+    0.0122,
+    0.2451
+   ],
+   "usage": [
+    0.0404,
+    0.0031,
+    0.0084,
+    0.9481
+   ]
+  },
+  {
+   "article_type": "Socks",
+   "prompt": "socks",
+   "season": [
+    0.6968,
+    0.059,
+    0.2442
+   ],
+   "usage": [
+    0.2486,
+    0.4781,
+    0.0047,
+    0.2686
+   ]
+  },
+  {
+   "article_type": "Sunglasses",
+   "prompt": "sunglasses",
+   "season": [
+    0.0084,
+    0.9899,
+    0.0017
+   ],
+   "usage": [
+    0.9267,
+    0.0543,
+    0.0082,
+    0.0108
+   ]
+  },
+  {
+   "article_type": "Earrings",
+   "prompt": "earrings",
+   "season": [
+    0.2446,
+    0.533,
+    0.2224
+   ],
+   "usage": [
+    0.2091,
+    0.0048,
+    0.7774,
+    0.0086
+   ]
+  },
+  {
+   "article_type": "Nightdress",
+   "prompt": "a nightdress",
+   "season": [
+    0.1771,
+    0.8194,
+    0.0035
+   ],
+   "usage": [
+    0.8678,
+    0.0319,
+    0.0434,
+    0.0569
+   ]
+  },
+  {
+   "article_type": "Night suits",
+   "prompt": "pajamas",
+   "season": [
+    0.8339,
+    0.1559,
+    0.0102
+   ],
+   "usage": [
+    0.8314,
+    0.0406,
+    0.0553,
+    0.0726
+   ]
+  }
+ ]
+}

@@ -4,19 +4,26 @@ Self-contained here (no import of the top-level ml/ folder) because the backend 
 built as its own Docker image from backend/ alone (see infra/docker-compose.yml) — ml/
 is a separate research/data-pipeline folder not included in that build context.
 
-- `category`: a linear-probe classifier trained on frozen FashionCLIP embeddings
-  (artifacts/category_classifier.joblib — see ml/notebooks/08_category_classifier.py for
-  how it was trained and validated: 81% accuracy / 0.81 macro F1 on held-out Tunisian
-  photos, vs. 62% / 0.55 for zero-shot).
-- `color` / `pattern` / `style`: zero-shot classification (no labeled training data exists
-  for these), same prompts as ml/src/features.py.
-- `season`: zero-shot too, but only a *suggestion* (fabric weight isn't reliably visible in
-  one photo) — callers should prefer a user-provided season and only fall back to it when
-  the model was confident (see SEASON_MIN_CONFIDENCE).
-- Every attribute comes with a confidence (softmax probability of the winning label).
-  `pattern`/`style`/`season` come back as None below their minimum confidence rather than
-  storing a near-random guess; `colors` lists up to MAX_COLORS labels above
-  COLOR_SECONDARY_MIN_PROB.
+- `category`: two stages. (1) the 8-class linear probe (artifacts/category_classifier.joblib,
+  ml/notebooks/08_category_classifier.py) says whether this is clothing at all
+  (hors_perimetre); (2) a dedicated 7-class RBF-SVM on garments only
+  (artifacts/garment_category_classifier.joblib, ml/notebooks/11_garment_category_head.py)
+  names the category. On the held-out Tunisian garment photos the gate keeps, it is 87.0%
+  accurate (macro-F1 0.871 over the 7 garment labels) vs 85.2% (0.851) for the 8-class probe:
+  a modest gain (+1.8 points, paired-bootstrap 95% CI [-0.4, +4.2] — not statistically
+  significant), clear on robes (F1 0.77 -> 0.86), slightly negative on vestes (0.76 -> 0.71).
+  Falls back to the probe if the second artifact is missing.
+- `season` / `style`: read through the garment type (app/ml/garment_types.py): FashionCLIP
+  recognizes "a pair of shorts" far better than "a summer garment", and each type carries a
+  learned leaning toward a season and a usage. Season is only *suggested* when confident
+  (SEASON_MIN_CONFIDENCE); style is Casual / Sports / Ethnic / Formal — the only styles with
+  enough labels to learn. Without the priors artifact, both fall back to zero-shot prompts.
+- `color` / `pattern`: zero-shot classification (no labeled training data of the right kind
+  exists). Prompt ensembling, synonyms and a probe trained on the Tunisian color labels were
+  all tried and none beat the plain prompt reliably (ml/reports/vision_agent_evaluation.md).
+- Every attribute comes with a confidence. `pattern`/`style`/`season` come back as None
+  below their minimum confidence rather than storing a near-random guess; `colors` lists up
+  to MAX_COLORS labels above COLOR_SECONDARY_MIN_PROB.
 - The raw embedding is also returned for similarity search (Purchase Agent / Pinecone).
 """
 
@@ -28,8 +35,11 @@ from pathlib import Path
 
 import numpy as np
 
+from app.ml import garment_types
+
 FASHIONCLIP_REPO = "patrickjohncyh/fashion-clip"
 CATEGORY_CLASSIFIER_PATH = Path(__file__).resolve().parent / "artifacts" / "category_classifier.joblib"
+GARMENT_CLASSIFIER_PATH = Path(__file__).resolve().parent / "artifacts" / "garment_category_classifier.joblib"
 
 COLOR_PROMPTS = {
     "noir": "black", "blanc": "white", "gris": "grey", "beige": "beige", "marron": "brown",
@@ -62,18 +72,23 @@ SEASON_PROMPTS = {
 
 # Below this the category is more guess than reading — typically a photo of several pieces
 # at once (a full outfit), which the classifier wasn't trained on (it saw one item per photo).
-# Measured on the 1,380 held-out Tunisian test photos (catalog-style, one item each; the
-# classifier is 83.7% accurate on in-scope garments there): at 0.50 it holds back 6.7% of
-# the correct predictions and catches 50.8% of the wrong ones, lifting the accuracy of what
-# gets through to 90.7%. (0.40: 2.4% / 22.5% / 86.6%; 0.60: 15.4% / 69.2% / 93.4%.) Users can
-# confirm a held-back category in one tap, so the false alarms are cheap. Real phone photos
-# may score differently than catalog shots — revisit with real uploads.
-CATEGORY_MIN_CONFIDENCE = 0.50
+# Measured end to end on the held-out Tunisian garment photos (735, catalog-style, one item each,
+# ml/notebooks/13_vision_agent_evaluation.py): at 0.60 it asks the user to confirm 9.8% of
+# garments — 4.6% of the correct predictions and 40.2% of the wrong ones; what gets through is
+# 90.3% accurate. Users confirm a held-back category in one tap, so the false alarms are cheap.
+# Real phone photos may score differently than catalog shots — revisit with real uploads.
+CATEGORY_MIN_CONFIDENCE = 0.60
 MAX_COLORS = 3
 COLOR_SECONDARY_MIN_PROB = 0.25
 PATTERN_MIN_CONFIDENCE = 0.30  # weak labels: below this, report no pattern
-STYLE_MIN_CONFIDENCE = 0.25
-SEASON_MIN_CONFIDENCE = 0.50  # below this, don't suggest a season at all
+# Measured on the 300 labeled Kaggle photos with the type-based method (model in garment_types.py):
+# season at >= 0.60 answers 21% of photos with 64% accuracy (the majority class gets 41% on that
+# subset); below it, no better than always answering the majority — so no suggestion at all.
+# Style at >= 0.70 answers 60% of photos with 0.90 balanced accuracy over the 4 learnable styles.
+STYLE_MIN_CONFIDENCE = 0.70  # type-based. (Zero-shot fallback uses ZERO_SHOT_STYLE_MIN_CONFIDENCE.)
+SEASON_MIN_CONFIDENCE = 0.60  # below this, don't suggest a season at all
+ZERO_SHOT_STYLE_MIN_CONFIDENCE = 0.25
+ZERO_SHOT_SEASON_MIN_CONFIDENCE = 0.50
 
 
 def _get_device() -> str:
@@ -102,6 +117,16 @@ def _load_category_classifier():
             "ml/notebooks/08_category_classifier.py and copy its output here."
         )
     return joblib.load(CATEGORY_CLASSIFIER_PATH)
+
+
+@lru_cache
+def _load_garment_classifier():
+    """The 7-class garment head, or None when the artifact isn't there (older checkout)."""
+    import joblib
+
+    if not GARMENT_CLASSIFIER_PATH.exists():
+        return None
+    return joblib.load(GARMENT_CLASSIFIER_PATH)
 
 
 def _normalize(vectors: np.ndarray) -> np.ndarray:
@@ -159,13 +184,21 @@ def _top(probs: dict[str, float]) -> tuple[str, float]:
 
 
 def predict_category(embedding: np.ndarray) -> tuple[str, float]:
-    clf = _load_category_classifier()
+    gate = _load_category_classifier()
     x = embedding.reshape(1, -1)
-    label = clf.predict(x)[0]
+    label = gate.predict(x)[0]
     # A linear probe normally exposes predict_proba; if it doesn't, report full
     # confidence rather than inventing a number.
-    confidence = float(clf.predict_proba(x).max()) if hasattr(clf, "predict_proba") else 1.0
-    return label, confidence
+    confidence = float(gate.predict_proba(x).max()) if hasattr(gate, "predict_proba") else 1.0
+    if label == "hors_perimetre":
+        return label, confidence  # not clothing: the garment head never saw such photos
+
+    head = _load_garment_classifier()
+    if head is None:
+        return label, confidence
+    probabilities = head.predict_proba(x)[0]
+    best = int(probabilities.argmax())
+    return str(head.classes_[best]), float(probabilities[best])
 
 
 def predict_colors(embedding: np.ndarray) -> tuple[list[str], float]:
@@ -184,15 +217,21 @@ def predict_pattern(embedding: np.ndarray) -> tuple[str | None, float]:
 
 
 def predict_style(embedding: np.ndarray) -> tuple[str | None, float]:
+    if garment_types.available():
+        label, confidence = _top(garment_types.usage_posterior(embedding))
+        return (label if confidence >= STYLE_MIN_CONFIDENCE else None), confidence
     label, confidence = _top(
         _zero_shot_probs(embedding, STYLE_PROMPTS, template="a photo of a {} item of clothing")
     )
-    return (label if confidence >= STYLE_MIN_CONFIDENCE else None), confidence
+    return (label if confidence >= ZERO_SHOT_STYLE_MIN_CONFIDENCE else None), confidence
 
 
 def predict_season(embedding: np.ndarray) -> tuple[str | None, float]:
+    if garment_types.available():
+        label, confidence = _top(garment_types.season_posterior(embedding))
+        return (label if confidence >= SEASON_MIN_CONFIDENCE else None), confidence
     label, confidence = _top(_zero_shot_probs(embedding, SEASON_PROMPTS, template="{}"))
-    return (label if confidence >= SEASON_MIN_CONFIDENCE else None), confidence
+    return (label if confidence >= ZERO_SHOT_SEASON_MIN_CONFIDENCE else None), confidence
 
 
 def analyze_image(image_bytes: bytes) -> dict:
