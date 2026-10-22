@@ -32,6 +32,7 @@ numpy>=1.26
 # Garment extraction (app/ml/garment_segmentation.py): connected components of the
 # SegFormer clothes masks
 scipy>=1.11
+opencv-python-headless>=4.8
 
 # Ecommerce Service: searches the bundled Tunisian catalog
 # (app/data/tunisian_catalog.parquet — see ml/src/catalog.py for how it's built)

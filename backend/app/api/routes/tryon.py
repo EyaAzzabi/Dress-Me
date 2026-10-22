@@ -39,18 +39,45 @@ def try_on_garment(
     if not tryon_agent.is_configured():
         raise HTTPException(status_code=503, detail="Virtual try-on isn't configured on this server.")
 
-    item = (
+    ids: list[uuid.UUID] = []
+    if payload.garment_item_ids:
+        ids.extend(payload.garment_item_ids)
+    elif payload.garment_item_id:
+        ids.append(payload.garment_item_id)
+
+    if not ids:
+        raise HTTPException(status_code=400, detail="Veuillez sélectionner au moins un vêtement.")
+
+    items = (
         db.query(ClothingItem)
-        .filter(ClothingItem.id == payload.garment_item_id, ClothingItem.owner_id == current_user.id)
-        .first()
+        .filter(ClothingItem.id.in_(ids), ClothingItem.owner_id == current_user.id)
+        .all()
     )
-    if item is None:
-        raise HTTPException(status_code=404, detail="That item isn't in your wardrobe.")
+    if not items:
+        raise HTTPException(status_code=404, detail="Aucune des pièces sélectionnées n'a été trouvée dans votre dressing.")
+
+    from app.agents.tryon_agent import GARMENT_CATEGORY, garments_for_outfit
 
     try:
-        return tryon_agent.run(person_image_url=current_user.avatar_photo_url, garment_image_url=item.image_url)
+        if len(items) == 1:
+            item = items[0]
+            category = GARMENT_CATEGORY.get(item.category, "upper_body") if item.category else "upper_body"
+            return tryon_agent.run(
+                person_image_url=current_user.avatar_photo_url,
+                garment_image_url=item.image_url,
+                category=category,
+            )
+        else:
+            garments = garments_for_outfit(items)
+            if not garments:
+                garments = [
+                    (it.image_url, GARMENT_CATEGORY.get(it.category, "upper_body"))
+                    for it in items
+                ]
+            return tryon_agent.run_outfit(
+                person_image_url=current_user.avatar_photo_url,
+                garments=garments,
+            )
     except (RuntimeError, TimeoutError) as exc:
-        # Upstream (Replicate) failure — e.g. no billing set up, generation failed, or
-        # timed out — not a bug in this request, so a 502 with the real reason beats a
-        # generic 500.
+        # Upstream (Replicate / HF) failure
         raise HTTPException(status_code=502, detail=str(exc))

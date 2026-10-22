@@ -1,6 +1,6 @@
 import uuid
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -41,11 +41,30 @@ class ClothingItemRead(BaseModel):
     season: str | None = None
     season_source: str | None = None
     pattern: str | None = None
-    attribute_confidence: dict[str, float] | None = None
+    attribute_confidence: dict[str, Any] | None = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class WardrobeAnalysisPayload(BaseModel):
+    image_url: str
+
+
+class WardrobeAnalysisResponse(BaseModel):
+    category: str
+    colors: list[str]
+    pattern: str | None = None
+    style: str | None = None
+    season: str | None = None
+    category_uncertain: bool = False
+    confidence: dict[str, float]
+    cv_diagnostics: dict[str, Any]
+    kmeans_palette: list[dict[str, Any]]
+    rag_analysis: dict[str, Any]
+    styling_insights: dict[str, Any]
+    segmentation: dict[str, Any] | None = None
 
 
 class ItemUsage(BaseModel):
@@ -56,3 +75,4 @@ class ItemUsage(BaseModel):
 
 class WornPayload(BaseModel):
     day: date | None = None  # defaults to today
+
