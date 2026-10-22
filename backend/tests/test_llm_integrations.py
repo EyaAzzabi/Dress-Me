@@ -45,7 +45,7 @@ def system(monkeypatch):
     vector[0] = 1
     embeddings = {str(i.id): vector.tolist() for i in items}
     monkeypatch.setattr("app.agents.orchestrator.vector_store.fetch_embeddings", lambda ids: embeddings)
-    monkeypatch.setattr("app.agents.recommendation_agent.compatibility_model.pair_compatibility", lambda a, b: 0.8)
+    monkeypatch.setattr("app.agents.recommendation_agent.compatibility_model.pair_compatibility", lambda a, b, **k: 0.8)
     monkeypatch.setattr("app.agents.context_agent.WeatherService.get_current_weather", lambda *a: None)
     monkeypatch.setattr("app.agents.purchase_agent.CatalogIndex.search", lambda *a, **k: [])
     monkeypatch.setattr("app.agents.purchase_agent.CatalogIndex.brand_affinity", lambda *a, **k: [])

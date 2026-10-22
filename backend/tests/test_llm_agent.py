@@ -35,6 +35,13 @@ def isolated_cache(monkeypatch):
     LLMAgent.clear_cache()
 
 
+def _agent_with_settings(monkeypatch, **overrides) -> LLMAgent:
+    overrides.setdefault("llm_provider", "none")
+    settings = Settings(_env_file=None, **overrides)
+    monkeypatch.setattr("app.agents.llm_agent.get_settings", lambda: settings)
+    return LLMAgent()
+
+
 def agent(**kw):
     return LLMAgent(settings=Settings(_env_file=None,
         **{"llm_provider": "groq", "llm_api_key": "unit-test-placeholder", **kw}))
@@ -260,7 +267,11 @@ def test_bad_facts_and_unknown_task_do_not_call_provider(monkeypatch):
     post.assert_not_called()
 
 
-def test_environment_file_configuration(tmp_path):
+def test_environment_file_configuration(tmp_path, monkeypatch):
+    # tests/conftest.py forces LLM_PROVIDER=none in the environment for every test, and an
+    # environment variable outranks the .env file this test is about — lift it here.
+    for name in ("LLM_PROVIDER", "LLM_MODEL", "LLM_TIMEOUT_SECONDS"):
+        monkeypatch.delenv(name, raising=False)
     env = tmp_path / ".env"
     env.write_text("LLM_PROVIDER=ollama\nLLM_MODEL=qwen2.5:3b\nLLM_TIMEOUT_SECONDS=4\n", encoding="utf-8")
     settings = Settings(_env_file=env)

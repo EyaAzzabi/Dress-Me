@@ -137,6 +137,8 @@ def test_huggingface_chain_dresses_garments_in_order_and_stores_the_result(monke
 
     monkeypatch.setattr(gradio_client, "Client", _Client)
     monkeypatch.setattr(gradio_client, "handle_file", lambda path: f"file:{path}")
+    # The agent downloads URLs to local files before handing them to Gradio; these URLs are fake.
+    monkeypatch.setattr(agent, "_resolve_to_local_file", lambda url: url)
 
     result = agent.run_outfit(
         person_image_url="https://x/avatar.jpg",

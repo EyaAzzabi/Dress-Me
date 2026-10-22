@@ -45,9 +45,8 @@ class AgentOrchestrator:
         self.purchase_agent = PurchaseAgent()
         self.extraction_agent = ExtractionAgent()
         self.packing_agent = PackingAgent()
-        # Owns an LLMAgent instance so it can inject it into RecommendationAgent.run
-        # for natural-language outfit explanations (FEAT-005). StyleProfileAgent keeps
-        # its own independent instance (its run() is a separate capability).
+        # Used to phrase outfit explanations (task="outfit"); StyleProfileAgent keeps its
+        # own independent instance for the profile narrative.
         self.llm_agent = LLMAgent()
 
     def recommend_outfits(
@@ -86,7 +85,9 @@ class AgentOrchestrator:
                 season=context.get("season"), temperature=context.get("temperature"),
                 weather=context.get("weather"), occasion_category=context.get("occasion_category"),
                 formality=context.get("formality"), references=references, ctx_vec=ctx_vec,
-                llm_agent=self.llm_agent,
+                # No llm_agent here on purpose: outfit explanations come from the grounded,
+                # cached llm_agent.run(task="outfit") below. Passing it in as well would make a
+                # second LLM call per outfit and feed LLM text back in as the "deterministic" fact.
             )
 
         # Prefer pieces wearable in the context's season; if that leaves nothing to build

@@ -110,6 +110,9 @@ def test_metadata_agent_uses_cleaned_image(monkeypatch, test_image_bytes):
     db.add(user)
     db.commit()
 
+    # Keep this test off the real Pinecone index (it rejects the all-zero test embedding).
+    monkeypatch.setattr("app.agents.metadata_agent.vector_store.upsert_item_embedding", lambda *a, **k: None)
+
     storage = _FakeStorage()
     agent = MetadataAgent(db, storage=storage)
 
