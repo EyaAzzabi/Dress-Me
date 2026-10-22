@@ -28,7 +28,7 @@ under `backend/app/agents/`, coordinated by `AgentOrchestrator`:
 
 | Agent | What it does |
 |---|---|
-| **VisionAgent** | FashionCLIP embeddings; category (trained linear probe, ~84% on in-scope garments), plus zero-shot color / pattern / style / season. Returns a confidence per attribute. |
+| **VisionAgent** | FashionCLIP embeddings. Category in two steps (a probe says clothing or not, an SVM names the garment: ~87% on held-out Tunisian garment photos); season and style read through the garment type (suggested only when confident); zero-shot color and pattern. Returns a confidence per attribute. Measured before/after numbers: `ml/reports/vision_agent_evaluation.md`. |
 | **MetadataAgent** | The digital wardrobe: add / correct / remove, search and filters, usage history (calendar + "worn" log). |
 | **StyleProfileAgent** | Learns the user's favorite styles/colors from the wardrobe. |
 | **ContextAgent** | Occasion / weather (OpenWeather) / season. |

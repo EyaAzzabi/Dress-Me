@@ -42,7 +42,7 @@ def test_run_returns_structured_attributes(monkeypatch):
     }
     assert isinstance(result["colors"], list) and 1 <= len(result["colors"]) <= 3
     assert result["pattern"] is None or isinstance(result["pattern"], str)
-    assert result["style"] is None or isinstance(result["style"], str)
+    assert result["style"] in {None, "Casual", "Sports", "Ethnic", "Formal"}
     assert result["season"] in {None, "ete", "hiver", "mi_saison"}
     assert set(result["confidence"]) == {"category", "colors", "pattern", "style", "season"}
     assert all(0.0 <= v <= 1.0 for v in result["confidence"].values())
