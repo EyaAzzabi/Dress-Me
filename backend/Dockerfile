@@ -30,4 +30,4 @@ EXPOSE 8000
 # repeat (alembic no-ops once the DB is already at head). Needs the `postgres`
 # service reachable at startup, which depends_on in docker-compose.yml guarantees
 # the container ordering for, though not that Postgres has finished its own init.
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

@@ -15,9 +15,10 @@ the [global architecture](../../docs/801880877_1090756726785409_1212958715350036
 
 ```bash
 npm install
-cp .env.example .env   # point API_URL at your backend, e.g. http://<lan-ip>:8000/api/v1
+cp .env.example .env   # set EXPO_PUBLIC_API_URL to the backend URL
 npm start
 ```
 
-Requires the `backend/` service running (see `../../infra/docker-compose.yml`) and, on a
-physical device, `API_URL` set to your machine's LAN IP rather than `localhost`.
+`EXPO_PUBLIC_API_URL` must point to the FastAPI server. A deployed phone build needs a
+public HTTPS API URL. For local development on a physical device, use the computer's
+LAN IP instead of `localhost`; the computer and Expo development server must remain on.
