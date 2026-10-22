@@ -8,7 +8,8 @@ class AvatarSet(BaseModel):
 
 
 class TryOnRequest(BaseModel):
-    garment_item_id: uuid.UUID
+    garment_item_id: uuid.UUID | None = None
+    garment_item_ids: list[uuid.UUID] | None = None
 
 
 class TryOnResult(BaseModel):

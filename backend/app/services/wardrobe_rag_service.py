@@ -43,7 +43,7 @@ class WardrobeRAGService:
     ) -> dict[str, Any]:
         """Runs KNN / Cosine similarity retrieval over existing wardrobe items."""
         category = new_attributes.get("category")
-        new_vec = new_embedding.reshape(1, -1)
+        new_vec = np.asarray(new_embedding, dtype=np.float32).reshape(1, -1)
 
         # 1. Duplicate / Near-Duplicate Detection (Same category, high similarity)
         similar_items = []
@@ -51,7 +51,8 @@ class WardrobeRAGService:
             emb = existing_embeddings.get(item.id)
             if emb is None:
                 continue
-            sim = float(cosine_similarity(new_vec, emb.reshape(1, -1))[0, 0])
+            emb_vec = np.asarray(emb, dtype=np.float32).reshape(1, -1)
+            sim = float(cosine_similarity(new_vec, emb_vec)[0, 0])
             if sim >= 0.70 and item.category == category:
                 similar_items.append({
                     "item_id": str(item.id),
@@ -79,8 +80,9 @@ class WardrobeRAGService:
                 emb = existing_embeddings.get(item.id)
                 score = 0.5
                 if emb is not None:
+                    emb_vec = np.asarray(emb, dtype=np.float32).reshape(1, -1)
                     # Content-based similarity score (style harmony)
-                    score = float(cosine_similarity(new_vec, emb.reshape(1, -1))[0, 0])
+                    score = float(cosine_similarity(new_vec, emb_vec)[0, 0])
                 # Boost if styles match
                 if item.style and new_attributes.get("style") and item.style == new_attributes.get("style"):
                     score += 0.15

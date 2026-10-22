@@ -170,6 +170,14 @@ export interface WardrobeAnalysisResponse {
     recommended_occasions?: string[];
     care_tip?: string;
   };
+  segmentation?: {
+    person_detected: boolean;
+    extracted_garments: {
+      category: string;
+      share: number;
+      image_url: string;
+    }[];
+  } | null;
 }
 
 export async function analyzePhoto(imageUrl: string): Promise<WardrobeAnalysisResponse> {

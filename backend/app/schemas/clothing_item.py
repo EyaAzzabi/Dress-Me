@@ -64,6 +64,7 @@ class WardrobeAnalysisResponse(BaseModel):
     kmeans_palette: list[dict[str, Any]]
     rag_analysis: dict[str, Any]
     styling_insights: dict[str, Any]
+    segmentation: dict[str, Any] | None = None
 
 
 class ItemUsage(BaseModel):

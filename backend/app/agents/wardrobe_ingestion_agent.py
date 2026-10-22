@@ -19,9 +19,11 @@ from app.agents.vision_agent import VisionAgent, MAX_IMAGE_BYTES
 from app.core.config import get_settings
 from app.db import vector_store
 from app.ml import vision_model
+from app.ml.garment_segmentation import segment_garments
 from app.models.clothing_item import ClothingItem
 from app.services.cv_service import inspect_and_preprocess_image
 from app.services.ml_color_service import extract_kmeans_palette
+from app.services.storage import StorageService
 from app.services.wardrobe_rag_service import WardrobeRAGService
 
 
@@ -82,6 +84,7 @@ class WardrobeIngestionAgent(BaseAgent):
                     "bounding_box": None,
                 }
                 kmeans_palette = []
+                segmentation_result = {"person_detected": False, "extracted_garments": []}
             else:
                 if content is None:
                     raise ValueError("No image content available.")
@@ -94,11 +97,35 @@ class WardrobeIngestionAgent(BaseAgent):
                 # 3. Machine Learning: K-Means pixel clustering for exact color palette
                 kmeans_palette = extract_kmeans_palette(content, n_colors=4)
 
+                # 4. Deep Learning Clothes Segmentation (SegFormer-B2 ATR parsing)
+                # Automatically isolates individual garments when the photo contains a person/model
+                segmentation_result = {"person_detected": False, "extracted_garments": []}
+                try:
+                    seg = segment_garments(content)
+                    if seg.person_detected and seg.garments:
+                        storage = StorageService()
+                        extracted = []
+                        for g in seg.garments:
+                            g_bytes = g.to_jpeg()
+                            g_url = storage.upload_image(g_bytes, "image/jpeg")
+                            extracted.append({
+                                "category": g.category,
+                                "share": g.share,
+                                "image_url": g_url,
+                            })
+                        segmentation_result = {
+                            "person_detected": True,
+                            "extracted_garments": extracted,
+                        }
+                except Exception as seg_err:
+                    import logging
+                    logging.getLogger("wardrobe_ingestion").warning(f"Garment segmentation skipped: {seg_err}")
+
             embedding = vision_result.get("embedding")
             if embedding is None:
                 embedding = np.zeros(512, dtype=np.float32)
 
-            # 4. RAG & Retrieval over user's existing wardrobe items
+            # 5. RAG & Retrieval over user's existing wardrobe items
             rag_context = {"duplicate_warning": None, "similar_items": [], "recommended_pairings": []}
             if self.db is not None and user_id is not None:
                 existing_items = (
@@ -127,6 +154,7 @@ class WardrobeIngestionAgent(BaseAgent):
                 "kmeans_palette": kmeans_palette,
                 "rag_analysis": rag_context,
                 "styling_insights": styling_insights,
+                "segmentation": segmentation_result,
             }
 
         except UnidentifiedImageError as exc:
