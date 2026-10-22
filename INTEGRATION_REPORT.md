@@ -1,5 +1,61 @@
 # Intégration LLMAgent — état final du 15 octobre 2026
 
+## Mise à jour du 21 octobre : cohérence des associations
+
+La conversation distingue désormais une base haut + bas d'une robe/combinaison.
+Chaque piste structurée est contrôlée : robe + bas, deux bas ou deux robes sont
+refusés. Les compléments optionnels mentionnant ces catégories sont également
+contrôlés, sans confondre une veste en jean avec un jean. Deux pistes alternatives
+peuvent naturellement utiliser des bases différentes. Les catégories usuelles
+françaises et anglaises sont prises en compte.
+
+Le modèle reçoit des consignes de construction de tenue et doit séparer ses
+alternatives. Une réponse incompatible déclenche la correction bornée existante ;
+si elle reste invalide, elle n'est pas affichée. La version du cache de conversation
+change pour ne pas réutiliser les anciennes suggestions. Les contrôles portent sur
+les catégories déclarées et les références structurées : ils ne prouvent ni la
+bonne classification d'une photo ni la cohérence de toute phrase libre possible.
+Les modèles, le frontend et les algorithmes/scores des autres agents sont conservés.
+
+Vérification backend : **273 tests réussis, 13 ignorés**, dont 21 nouveaux cas de
+cohérence et de réparation, avec fournisseur simulé dans les tests automatisés.
+Deux appels **réels à Groq GPT-OSS 120B**, sur un dressing synthétique sans lecture
+ni écriture en base, ont produit des tenues distinctes : robe + veste + chaussures,
+et haut + bas + veste + chaussures. Durées : 2,69 s et 1,87 s. La troisième relance
+a rencontré une limitation de quota ; elle n'est pas comptée comme un succès.
+Le rapport brut reste local : `verification/outfit-coherence-live-20261021.json`.
+
+## État de l'intégration initiale
+
+### Réponses d'avis directes, 21 octobre
+
+Les demandes d'avis appellent maintenant une réponse brève et explicite, avec
+une justification liée aux informations disponibles. Le modèle distingue en
+interne avis, conseil et clarification ; ce champ n'est pas affiché dans l'API.
+Pour un avis, le serveur retire les pistes de tenue et les relances non demandées.
+Les questions restent libres : aucune banque de réponses oui/non n'est utilisée.
+La pièce sélectionnée est prioritaire pour résoudre « elle » dans la conversation.
+
+Essais réels Groq sur données synthétiques : « elle est moche ? » a reçu
+« Non, elle n'est pas moche… » ; « Le noir et le bleu, ça va ensemble ? » a reçu
+« Oui… ». Les modèles 120B et de secours 20B ont été utilisés. Un essai a aussi
+révélé une affirmation inventée sur le rendu porté ; un contrôle ciblé et ses
+tests de régression ont été ajoutés pour refuser ces affirmations et demander une
+correction. Ce contrôle ciblé ne constitue pas une preuve de toute la prose.
+Rapport fournisseur local : `verification/direct-opinions-live-20261021.json`.
+
+Suite backend finale après ces changements : **280 tests réussis, 13 ignorés**,
+10 avertissements, 15,19 s. Les tests automatisés utilisent des fournisseurs simulés.
+
+Avant publication, le 22 octobre : les **121 tests ciblés LLMAgent, conversation et
+routes de chat réussissent** en 3,19 s. La relance de la suite complète reste sans
+progression après 26 tests, à l'entrée du test du modèle de compatibilité réel ;
+elle a été interrompue sans modifier cet agent. Les 280 réussites ci-dessus
+correspondent à l'exécution complète du 21 octobre, pas à cette relance.
+
+Le backend DressMe a été relancé sur `8001`, le frontend sur `5174`, afin de
+laisser Pulse AI fonctionner sur ses ports `8000` et `5173`.
+
 Branche de publication : `sarah/llm-agent`, issue du commit
 `94d6b10005050726f14370f0661189961b0ff1e6`. Intégration préparée sur
 `sarah/llm-agent-integration`, puis transférée sur la branche de contribution.

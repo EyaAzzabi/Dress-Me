@@ -103,7 +103,7 @@ class LLMAgent(BaseAgent):
             self._log("configuration_or_facts_invalid", error_type=type(exc).__name__)
             return {"explanation": None}
         identity = sha256(json.dumps([self.settings.llm_provider, base, model, key]).encode()).hexdigest()
-        cache_key = sha256(json.dumps(["conversation-v2" if task == "assistant" else "v1", identity, cache_scope, instruction, payload,
+        cache_key = sha256(json.dumps(["conversation-v4" if task == "assistant" else "v1", identity, cache_scope, instruction, payload,
                                      self.settings.llm_timeout_seconds, self.settings.llm_max_retries,
                                      self.settings.llm_cache_ttl_seconds]).encode()).hexdigest()
         # Single-flight stripes prevent duplicate calls without a global network lock.
