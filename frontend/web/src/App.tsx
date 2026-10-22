@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   ClothingItem,
@@ -17,6 +17,7 @@ import {
   LowCategoryConfidence,
 } from "./api";
 import "./styles.css";
+import LlmAssistant from "./LlmAssistant";
 
 type Screen =
   | "overview"
@@ -24,6 +25,7 @@ type Screen =
   | "outfits"
   | "calendar"
   | "profile"
+  | "assistant"
   | "packing"
   | "purchase"
   | "tryon"
@@ -35,6 +37,7 @@ const NAV_ITEMS: { id: Screen; label: string; icon: string; group: string }[] = 
   { id: "outfits", label: "Idées de looks", icon: "✧", group: "TON ESPACE" },
   { id: "calendar", label: "Calendrier", icon: "▦", group: "TON ESPACE" },
   { id: "profile", label: "Mon style", icon: "◎", group: "DÉCOUVRIR" },
+  { id: "assistant", label: "Assistant IA", icon: "✦", group: "DÉCOUVRIR" },
   { id: "packing", label: "Ma valise", icon: "▣", group: "DÉCOUVRIR" },
   { id: "purchase", label: "J’achète ou pas ?", icon: "♡", group: "DÉCOUVRIR" },
   { id: "tryon", label: "Essayage virtuel", icon: "✦", group: "DÉCOUVRIR" },
@@ -47,6 +50,7 @@ const SCREEN_COPY: Record<Screen, { title: string; subtitle: string }> = {
   outfits: { title: "Idées de looks", subtitle: "Des tenues pensées selon l’occasion, la saison et la météo." },
   calendar: { title: "Mon calendrier", subtitle: "Prépare tes tenues et retrouve-les au bon moment." },
   profile: { title: "Mon style", subtitle: "Découvre ce que ton dressing révèle de tes préférences." },
+  assistant: { title: "Mon assistant style", subtitle: "Ton profil, tes tenues, tes envies : des explications qui te ressemblent." },
   packing: { title: "Ma valise", subtitle: "Prépare une sélection de pièces pour ton prochain voyage." },
   purchase: { title: "J’achète ou pas ?", subtitle: "Vérifie si une nouvelle pièce s’accorde à ton dressing." },
   tryon: { title: "Essayage virtuel", subtitle: "Visualise une pièce sur ta photo avant de l’ajouter à ton look." },
@@ -406,11 +410,19 @@ export default function App() {
     setNotice("La pièce a été analysée et ajoutée à ton dressing.");
   }
 
+  const [uploadStage, setUploadStage] = useState("");
+  const firstPhotoNoticeShown = useRef(sessionStorage.getItem("dressme_first_photo_notice") === "shown");
+
   async function addItem(file: File, season: string) {
     setBusy("wardrobe-upload");
+    setUploadStage("Envoi de ta photo…");
     setError("");
     try {
       const imageUrl = await uploadPhoto(file);
+      const firstPhotoNotice = firstPhotoNoticeShown.current ? "" : " Le premier ajout peut être plus long.";
+      firstPhotoNoticeShown.current = true;
+      sessionStorage.setItem("dressme_first_photo_notice", "shown");
+      setUploadStage(`Photo reçue. Analyse du vêtement en cours…${firstPhotoNotice}`);
       try {
         const analysis = await analyzePhoto(imageUrl);
         const topExtracted = analysis.segmentation?.person_detected && analysis.segmentation.extracted_garments?.length
@@ -861,6 +873,7 @@ export default function App() {
         )}
 
         <div className="page-content">
+          {screen === "wardrobe" && busy === "wardrobe-upload" && <div className="content-card" role="status"><p>{uploadStage}</p><button type="button" className="text-button" onClick={() => navigate("assistant")}>Tester l’assistant IA pendant l’attente →</button></div>}
           {error && <div className="alert alert-error" role="alert"><span>!</span><p>{error}</p><button type="button" aria-label="Fermer l’erreur" onClick={() => setError("")}>×</button></div>}
           {notice && <div className="alert alert-success" role="status"><span>✓</span><p>{notice}</p><button type="button" aria-label="Fermer le message" onClick={() => setNotice("")}>×</button></div>}
 
@@ -911,6 +924,7 @@ export default function App() {
           {screen === "outfits" && <OutfitsView items={items} itemsById={itemsById} outfits={outfits} favorites={outfitFavorites} scheduled={scheduled} today={today} busy={busy} onGenerate={generateLooks} onToggleFavorite={(id) => toggleFavorite(id, "outfit")} onSchedule={scheduleOutfit} />}
           {screen === "calendar" && <CalendarView anchor={monthAnchor} onMonthChange={setMonthAnchor} scheduled={scheduled} items={items} loading={loading} onSave={saveCalendarOutfit} onRemove={removeCalendarOutfit}  onRender={renderCalendarOutfit} />}
           {screen === "profile" && <ProfileView user={user} profile={profile} busy={busy} onAvatar={uploadAvatar} onNavigate={navigate} />}
+          {screen === "assistant" && <LlmAssistant onNavigate={navigate} />}
           {screen === "packing" && <PackingView lists={packingLists} busy={busy} onCreate={createPacking} onToggle={togglePackedItem} onDelete={deletePackingList} />}
           {screen === "purchase" && <PurchaseView result={purchaseResult} busy={busy} onCheck={runPurchaseCheck} />}
           {screen === "donation" && (
