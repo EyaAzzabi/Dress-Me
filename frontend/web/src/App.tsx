@@ -8,6 +8,16 @@ import {
   Outfit,
   PackingList,
   PurchaseResult,
+  PurchaseHistoryItem,
+  WishlistEntry,
+  CatalogAlternative,
+  formatTnd,
+  getPurchaseHistory,
+  deleteHistoryEntry,
+  clearPurchaseHistory,
+  getWishlist,
+  addToWishlist,
+  removeFromWishlist,
   ScheduledOutfit,
   StyleProfile,
   uploadPhoto,
@@ -926,7 +936,14 @@ export default function App() {
           {screen === "profile" && <ProfileView user={user} profile={profile} busy={busy} onAvatar={uploadAvatar} onNavigate={navigate} />}
           {screen === "assistant" && <LlmAssistant onNavigate={navigate} />}
           {screen === "packing" && <PackingView lists={packingLists} busy={busy} onCreate={createPacking} onToggle={togglePackedItem} onDelete={deletePackingList} />}
-          {screen === "purchase" && <PurchaseView result={purchaseResult} busy={busy} onCheck={runPurchaseCheck} />}
+          {screen === "purchase" && (
+            <PurchaseView
+              result={purchaseResult}
+              busy={busy}
+              onCheck={runPurchaseCheck}
+              onRestoreResult={setPurchaseResult}
+            />
+          )}
           {screen === "donation" && (
             <DonationView
               donations={donations}
@@ -2224,11 +2241,40 @@ function PackingView({ lists, busy, onCreate, onToggle, onDelete }: {
   </>;
 }
 
-function PurchaseView({ result, busy, onCheck }: {
+const PURCHASE_CATEGORY_LABELS: Record<string, string> = {
+  haut: "Haut", bas: "Bas", robe: "Robe", veste: "Veste",
+  chaussures: "Chaussures", sac: "Sac", accessoire: "Accessoire",
+};
+
+const PURCHASE_VERDICTS: Record<PurchaseResult["verdict"], string> = {
+  recommended: "Recommandé",
+  think_twice: "À réfléchir",
+  not_recommended: "Déconseillé",
+};
+
+function openStorePage(url?: string | null) {
+  if (url) window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function PurchaseView({ result, busy, onCheck, onRestoreResult }: {
   result: PurchaseResult | null;
   busy: string;
   onCheck: (file: File) => Promise<void>;
+  onRestoreResult: (result: PurchaseResult) => void;
 }) {
+  const [history, setHistory] = useState<PurchaseHistoryItem[]>([]);
+  const [wishlist, setWishlist] = useState<WishlistEntry[]>([]);
+  const [shopTab, setShopTab] = useState<"history" | "wishlist">("history");
+  const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
+  const brands = result?.tunisian_brands ?? [];
+  const savedKeys = useMemo(() => new Set(wishlist.map((item) => item.item_key)), [wishlist]);
+
+  const refreshHistory = () => { getPurchaseHistory().then(setHistory).catch(() => {}); };
+  const refreshWishlist = () => { getWishlist().then(setWishlist).catch(() => {}); };
+
+  useEffect(() => { refreshHistory(); refreshWishlist(); }, []);
+  useEffect(() => { refreshHistory(); }, [result]);
+
   const verdictText =
     result?.verdict === "recommended"
       ? "Coup de cœur : Cette pièce s’accorde à merveille avec ton dressing !"
@@ -2236,11 +2282,61 @@ function PurchaseView({ result, busy, onCheck }: {
       ? "À réfléchir : Tu possèdes déjà des pièces très similaires."
       : "Achat risqué : Cette pièce sera difficile à associer avec ton style actuel.";
 
+  async function toggleSave(product: CatalogAlternative) {
+    if (!product.item_key) return;
+    const key = product.item_key;
+    if (savedKeys.has(key)) {
+      setWishlist((current) => current.filter((item) => item.item_key !== key));
+      await removeFromWishlist(key).catch(refreshWishlist);
+    } else {
+      await addToWishlist(key).then((entry) => {
+        setWishlist((current) => [entry, ...current.filter((item) => item.item_key !== key)]);
+      }).catch(refreshWishlist);
+    }
+  }
+
+  function openHistory(item: PurchaseHistoryItem) {
+    setActiveHistoryId(item.id);
+    onRestoreResult(item.result);
+  }
+
+  function removeHistory(item: PurchaseHistoryItem) {
+    setHistory((current) => current.filter((entry) => entry.id !== item.id));
+    if (item.id === activeHistoryId) setActiveHistoryId(null);
+    deleteHistoryEntry(item.id).catch(refreshHistory);
+  }
+
+  function ProductCard({ product }: { product: CatalogAlternative }) {
+    const saved = product.item_key != null && savedKeys.has(product.item_key);
+    const href = product.product_url || product.store_url;
+    return (
+      <article className="alternative-card">
+        {product.image_url ? <img src={product.image_url} alt={product.name} /> : <span className="alternative-placeholder">✧</span>}
+        <div>
+          <b>{product.name}</b>
+          <small>{[product.brand, product.category].filter(Boolean).join(" · ")}</small>
+          <strong>{formatTnd(product.price) ?? "Prix n.c."}</strong>
+        </div>
+        <div className="purchase-card-actions">
+          {product.item_key && (
+            <button type="button" className={`wish-heart${saved ? " is-saved" : ""}`} onClick={() => void toggleSave(product)} title={saved ? "Retirer de la wishlist" : "Ajouter à la wishlist"}>
+              {saved ? "♥" : "♡"}
+            </button>
+          )}
+          {href && (
+            <a className="store-link" href={href} target="_blank" rel="noreferrer">
+              {product.buyable ? "Acheter" : "Voir"} ↗
+            </a>
+          )}
+        </div>
+      </article>
+    );
+  }
+
   return <>
     <PageHeading title="J’achète ou pas ?" subtitle="Un doute en boutique ou en ligne ? Téléverse la photo d'un vêtement pour vérifier sa compatibilité avant d'acheter." />
 
     <div className="purchase-layout modern-purchase-layout">
-      {/* Upload Section */}
       <section className="content-card purchase-card">
         <span className="eyebrow">CONSEILLER D'ACHAT IA</span>
         <h2>Une pièce te fait envie ?</h2>
@@ -2264,7 +2360,6 @@ function PurchaseView({ result, busy, onCheck }: {
         <p className="privacy-note">🔒 Analyse 100% confidentielle liée à ton dressing.</p>
       </section>
 
-      {/* Results Section */}
       <section className="content-card purchase-result modern-purchase-result">
         {result ? (
           <>
@@ -2281,7 +2376,7 @@ function PurchaseView({ result, busy, onCheck }: {
             <div className="compatibility-meter modern-compat-meter">
               <div className="meter-header">
                 <span>Score d’harmonie avec ton dressing</span>
-                <b>{Math.round(result.compatibility_score * 100)}%</b>
+                <b>{result.score ?? Math.round(result.compatibility_score * 100)}</b>
               </div>
               <i className="meter-track">
                 <b
@@ -2298,23 +2393,60 @@ function PurchaseView({ result, busy, onCheck }: {
 
             {result.catalog_alternatives.length > 0 && (
               <div className="alternatives-section">
-                <h3>Pièces similaires ou alternatives</h3>
+                <h3>Alternatives en Tunisie</h3>
+                <p className="section-hint">Trouvées par ressemblance visuelle (FashionCLIP) — ouvre la page produit de la marque.</p>
                 <div className="alternatives">
                   {result.catalog_alternatives.map((alternative, index) => (
-                    <article className="alternative-card" key={`${alternative.name}-${index}`}>
-                      {alternative.image_url ? (
-                        <img src={alternative.image_url} alt={alternative.name} />
-                      ) : (
-                        <span className="alternative-placeholder">✧</span>
-                      )}
-                      <div>
-                        <b>{alternative.name}</b>
-                        <small>{[alternative.brand, alternative.category].filter(Boolean).join(" · ")}</small>
-                        <strong>{alternative.price != null ? `${alternative.price} TND` : "Disponible"}</strong>
-                      </div>
-                    </article>
+                    <ProductCard key={alternative.item_key ?? `${alternative.name}-${index}`} product={alternative} />
                   ))}
                 </div>
+              </div>
+            )}
+
+            {brands.length > 0 && (
+              <div className="brands-section">
+                <h3>Marques tunisiennes pour toi</h3>
+                <p className="section-hint">Classées par affinité visuelle avec cet article et ton style.</p>
+                {brands.map((brand, rank) => {
+                  const best = brands[0].affinity || 1;
+                  const match = Math.round((brand.affinity / best) * 100);
+                  return (
+                    <article className="brand-card" key={brand.name}>
+                      <div className="brand-card-top">
+                        <span className={`brand-rank${rank === 0 ? " is-first" : ""}`}>{rank + 1}</span>
+                        <div>
+                          <b>{brand.name}</b>
+                          <small>
+                            {brand.product_count} articles similaires
+                            {brand.price_min != null && brand.price_max != null
+                              ? ` · ${formatTnd(brand.price_min)} – ${formatTnd(brand.price_max)}`
+                              : ""}
+                          </small>
+                          <i className="brand-affinity"><b style={{ width: `${match}%` }} /></i>
+                        </div>
+                        {brand.website && (
+                          <a className="store-link" href={brand.website} target="_blank" rel="noreferrer">Site ↗</a>
+                        )}
+                      </div>
+                      {brand.showcase.length > 0 && (
+                        <div className="brand-showcase">
+                          {brand.showcase.map((product, index) => (
+                            <button
+                              type="button"
+                              className="showcase-item"
+                              key={product.item_key ?? `${product.name}-${index}`}
+                              onClick={() => openStorePage(product.product_url || product.store_url || brand.website)}
+                            >
+                              {product.image_url ? <img src={product.image_url} alt="" /> : <span>✧</span>}
+                              <b>{product.name}</b>
+                              <small>{formatTnd(product.price) ?? "Prix n.c."}</small>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
               </div>
             )}
           </>
@@ -2322,11 +2454,75 @@ function PurchaseView({ result, busy, onCheck }: {
           <EmptyState
             icon="♡"
             title="En attente d'une pièce à analyser"
-            text="Téléverse la photo d'un vêtement à gauche pour découvrir le score de compatibilité, les associations possibles et nos conseils d'achat."
+            text="Téléverse la photo d'un vêtement à gauche pour découvrir le score de compatibilité, les alternatives tunisiennes et nos conseils d'achat."
           />
         )}
       </section>
     </div>
+
+    <section className="content-card shopping-space">
+      <div className="shopping-space-head">
+        <div>
+          <span className="eyebrow">MON ESPACE SHOPPING</span>
+          <h2>Historique et wishlist</h2>
+          <p>Tes analyses et tes coups de cœur, suivis en direct.</p>
+        </div>
+        <div className="shopping-stats">
+          <span><b>{history.length}</b> analyses</span>
+          <span><b>{wishlist.length}</b> wishlist</span>
+        </div>
+      </div>
+      <div className="shopping-tabs">
+        <button type="button" className={shopTab === "history" ? "active" : ""} onClick={() => setShopTab("history")}>
+          Historique ({history.length})
+        </button>
+        <button type="button" className={shopTab === "wishlist" ? "active" : ""} onClick={() => setShopTab("wishlist")}>
+          Wishlist ({wishlist.length})
+        </button>
+      </div>
+      {shopTab === "history" ? (
+        history.length === 0 ? (
+          <p className="inline-hint">Chaque article analysé est enregistré ici, pour le revoir en un geste.</p>
+        ) : (
+          <div className="shopping-list">
+            {history.map((item) => (
+              <article className={`shopping-row${item.id === activeHistoryId ? " is-active" : ""}`} key={item.id}>
+                <button type="button" className="shopping-row-main" onClick={() => openHistory(item)}>
+                  <img src={item.image_url} alt="" />
+                  <div>
+                    <b>{PURCHASE_CATEGORY_LABELS[item.category] ?? item.category}{item.color ? ` · ${item.color}` : ""}</b>
+                    <small className={`verdict-tag verdict-${item.verdict}`}>{PURCHASE_VERDICTS[item.verdict]} · {item.score}</small>
+                  </div>
+                </button>
+                <button type="button" className="text-button" onClick={() => removeHistory(item)}>Supprimer</button>
+              </article>
+            ))}
+            <button type="button" className="text-button danger" onClick={() => { setHistory([]); setActiveHistoryId(null); clearPurchaseHistory().catch(refreshHistory); }}>
+              Effacer tout l'historique
+            </button>
+          </div>
+        )
+      ) : wishlist.length === 0 ? (
+        <p className="inline-hint">Touche ♡ sur une alternative : on suit son prix et on ouvre la page de la marque.</p>
+      ) : (
+        <div className="shopping-list">
+          {wishlist.map((item) => (
+            <article className="shopping-row" key={item.item_key}>
+              <button type="button" className="shopping-row-main" onClick={() => openStorePage(item.product_url || item.store_url)}>
+                {item.image_url ? <img src={item.image_url} alt="" /> : <span className="alternative-placeholder">♡</span>}
+                <div>
+                  <b>{item.name}</b>
+                  <small>{[item.brand, formatTnd(item.live_price ?? item.saved_price)].filter(Boolean).join(" · ")}</small>
+                </div>
+              </button>
+              <button type="button" className="text-button" onClick={() => { setWishlist((current) => current.filter((entry) => entry.item_key !== item.item_key)); removeFromWishlist(item.item_key).catch(refreshWishlist); }}>
+                Retirer
+              </button>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
   </>;
 }
 

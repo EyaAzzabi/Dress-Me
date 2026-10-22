@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 860" width="1280" height="860">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1A1B3A"/>
+      <stop offset="1" stop-color="#2D1B4E"/>
+    </linearGradient>
+    <filter id="shadow" x="-8%" y="-8%" width="116%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="860" fill="url(#bg)"/>
+  <text x="640" y="42" text-anchor="middle" fill="#F7E7D0" font-family="Georgia, serif" font-size="28" font-weight="700">Purchase Agent - DressMe</text>
+  <text x="640" y="70" text-anchor="middle" fill="#E8B4C8" font-family="Segoe UI, sans-serif" font-size="15">Vision  -  Score  -  Sandbox d'outils  -  LLM LoRA  -  Conseil d'achat</text>
+
+  <g filter="url(#shadow)">
+    <rect x="40" y="104" width="160" height="128" rx="16" fill="#F7E7D0"/>
+    <text x="120" y="150" text-anchor="middle" fill="#1A1B3A" font-family="Segoe UI" font-size="15" font-weight="700">1. Photo</text>
+    <text x="120" y="176" text-anchor="middle" fill="#5C4A5A" font-family="Segoe UI" font-size="12">vetement / tenue</text>
+    <text x="120" y="198" text-anchor="middle" fill="#5C4A5A" font-family="Segoe UI" font-size="11">app mobile Expo</text>
+  </g>
+  <polygon points="210,168 238,168 238,160 262,168 238,176 238,168" fill="#E8B4C8"/>
+
+  <g filter="url(#shadow)">
+    <rect x="270" y="96" width="210" height="144" rx="16" fill="#C45C7A"/>
+    <text x="375" y="132" text-anchor="middle" fill="#fff" font-family="Segoe UI" font-size="14" font-weight="700">2. ExtractionAgent</text>
+    <text x="375" y="158" text-anchor="middle" fill="#F7E7D0" font-family="Segoe UI" font-size="13">SegFormer-B2</text>
+    <text x="375" y="180" text-anchor="middle" fill="#F7E7D0" font-family="Segoe UI" font-size="12">segmentation pixel</text>
+    <text x="375" y="202" text-anchor="middle" fill="#F7E7D0" font-family="Segoe UI" font-size="12">1 decoupe / vetement</text>
+    <text x="375" y="222" text-anchor="middle" fill="#F7E7D0" font-family="Segoe UI" font-size="11">couleur + categorie</text>
+  </g>
+  <polygon points="490,168 518,168 518,160 542,168 518,176 518,168" fill="#E8B4C8"/>
+
+  <g filter="url(#shadow)">
+    <rect x="550" y="96" width="210" height="144" rx="16" fill="#3D5A80"/>
+    <text x="655" y="132" text-anchor="middle" fill="#fff" font-family="Segoe UI" font-size="14" font-weight="700">3. FashionCLIP</text>
+    <text x="655" y="158" text-anchor="middle" fill="#D6E4F0" font-family="Segoe UI" font-size="13">embedding 512-d L2</text>
+    <text x="655" y="180" text-anchor="middle" fill="#D6E4F0" font-family="Segoe UI" font-size="12">+ filtre clothing_gate</text>
+    <text x="655" y="202" text-anchor="middle" fill="#D6E4F0" font-family="Segoe UI" font-size="12">vetement ou hors perimetre</text>
+    <text x="655" y="222" text-anchor="middle" fill="#D6E4F0" font-family="Segoe UI" font-size="11">CLIP zero-shot</text>
+  </g>
+  <polygon points="770,168 798,168 798,160 822,168 798,176 798,168" fill="#E8B4C8"/>
+
+  <g filter="url(#shadow)">
+    <rect x="830" y="88" width="410" height="160" rx="16" fill="#F7E7D0"/>
+    <text x="1035" y="118" text-anchor="middle" fill="#1A1B3A" font-family="Segoe UI" font-size="15" font-weight="700">4. PurchaseAgent - score 0-100</text>
+    <rect x="850" y="136" width="88" height="90" rx="10" fill="#C45C7A"/>
+    <text x="894" y="172" text-anchor="middle" fill="#fff" font-size="12" font-family="Segoe UI" font-weight="700">40%</text>
+    <text x="894" y="192" text-anchor="middle" fill="#F7E7D0" font-size="10" font-family="Segoe UI">Polyvalence</text>
+    <text x="894" y="208" text-anchor="middle" fill="#F7E7D0" font-size="9" font-family="Segoe UI">Polyvore</text>
+    <rect x="948" y="136" width="88" height="90" rx="10" fill="#9B4D6C"/>
+    <text x="992" y="172" text-anchor="middle" fill="#fff" font-size="12" font-family="Segoe UI" font-weight="700">25%</text>
+    <text x="992" y="192" text-anchor="middle" fill="#F7E7D0" font-size="10" font-family="Segoe UI">Originalite</text>
+    <text x="992" y="208" text-anchor="middle" fill="#F7E7D0" font-size="9" font-family="Segoe UI">cosinus</text>
+    <rect x="1046" y="136" width="88" height="90" rx="10" fill="#3D5A80"/>
+    <text x="1090" y="172" text-anchor="middle" fill="#fff" font-size="12" font-family="Segoe UI" font-weight="700">20%</text>
+    <text x="1090" y="192" text-anchor="middle" fill="#D6E4F0" font-size="10" font-family="Segoe UI">Style</text>
+    <text x="1090" y="208" text-anchor="middle" fill="#D6E4F0" font-size="9" font-family="Segoe UI">centroide</text>
+    <rect x="1144" y="136" width="78" height="90" rx="10" fill="#2A9D8F"/>
+    <text x="1183" y="172" text-anchor="middle" fill="#fff" font-size="12" font-family="Segoe UI" font-weight="700">15%</text>
+    <text x="1183" y="192" text-anchor="middle" fill="#E8FFF8" font-size="10" font-family="Segoe UI">Prix</text>
+    <text x="1183" y="208" text-anchor="middle" fill="#E8FFF8" font-size="9" font-family="Segoe UI">marche TN</text>
+  </g>
+
+  <polygon points="640,262 632,262 640,290 648,262" fill="#E8B4C8"/>
+
+  <g filter="url(#shadow)">
+    <rect x="40" y="304" width="1200" height="214" rx="18" fill="#241C38" stroke="#E8B4C8" stroke-width="2"/>
+    <text x="640" y="338" text-anchor="middle" fill="#F7E7D0" font-family="Segoe UI" font-size="16" font-weight="700">5. Sandbox ferme - le LLM n'a ni Python ni internet</text>
+    <text x="640" y="360" text-anchor="middle" fill="#C9B8C8" font-family="Segoe UI" font-size="12">L'embedding FashionCLIP reste ici, jamais dans le prompt</text>
+
+    <rect x="70" y="380" width="210" height="110" rx="12" fill="#C45C7A"/>
+    <text x="175" y="416" text-anchor="middle" fill="#fff" font-size="13" font-weight="700" font-family="Segoe UI">inspect_wardrobe</text>
+    <text x="175" y="438" text-anchor="middle" fill="#F7E7D0" font-size="11" font-family="Segoe UI">doublons, tenues, style</text>
+    <text x="175" y="458" text-anchor="middle" fill="#F7E7D0" font-size="10" font-family="Segoe UI">garde-robe Postgres</text>
+    <text x="175" y="476" text-anchor="middle" fill="#F7E7D0" font-size="10" font-family="Segoe UI">seuil 0.95 = doublon</text>
+
+    <rect x="300" y="380" width="210" height="110" rx="12" fill="#3D5A80"/>
+    <text x="405" y="416" text-anchor="middle" fill="#fff" font-size="13" font-weight="700" font-family="Segoe UI">search_catalog</text>
+    <text x="405" y="438" text-anchor="middle" fill="#D6E4F0" font-size="11" font-family="Segoe UI">k plus proches voisins</text>
+    <text x="405" y="458" text-anchor="middle" fill="#D6E4F0" font-size="10" font-family="Segoe UI">catalogue tunisien .npz</text>
+    <text x="405" y="476" text-anchor="middle" fill="#D6E4F0" font-size="10" font-family="Segoe UI">liens Shopify / marques</text>
+
+    <rect x="530" y="380" width="210" height="110" rx="12" fill="#2A9D8F"/>
+    <text x="635" y="416" text-anchor="middle" fill="#fff" font-size="13" font-weight="700" font-family="Segoe UI">compare_price</text>
+    <text x="635" y="438" text-anchor="middle" fill="#E8FFF8" font-size="11" font-family="Segoe UI">percentile vs marche</text>
+    <text x="635" y="458" text-anchor="middle" fill="#E8FFF8" font-size="10" font-family="Segoe UI">mediane TND</text>
+    <text x="635" y="476" text-anchor="middle" fill="#E8FFF8" font-size="10" font-family="Segoe UI">kNN prix catalogue</text>
+
+    <rect x="760" y="380" width="210" height="110" rx="12" fill="#9B4D6C"/>
+    <text x="865" y="416" text-anchor="middle" fill="#fff" font-size="13" font-weight="700" font-family="Segoe UI">rank_brands</text>
+    <text x="865" y="438" text-anchor="middle" fill="#F7E7D0" font-size="11" font-family="Segoe UI">Kontakt, Barsha, HA</text>
+    <text x="865" y="458" text-anchor="middle" fill="#F7E7D0" font-size="10" font-family="Segoe UI">affinite visuelle</text>
+    <text x="865" y="476" text-anchor="middle" fill="#F7E7D0" font-size="10" font-family="Segoe UI">7 marques Shopify</text>
+
+    <rect x="990" y="380" width="220" height="110" rx="12" fill="#4A3F6B"/>
+    <text x="1100" y="416" text-anchor="middle" fill="#fff" font-size="13" font-weight="700" font-family="Segoe UI">cost_per_wear</text>
+    <text x="1100" y="438" text-anchor="middle" fill="#E8B4C8" font-size="11" font-family="Segoe UI">prix / ports par an</text>
+    <text x="1100" y="458" text-anchor="middle" fill="#E8B4C8" font-size="10" font-family="Segoe UI">polyvalence</text>
+    <text x="1100" y="476" text-anchor="middle" fill="#E8B4C8" font-size="10" font-family="Segoe UI">cout par utilisation</text>
+  </g>
+
+  <polygon points="640,528 632,528 640,556 648,528" fill="#E8B4C8"/>
+
+  <g filter="url(#shadow)">
+    <rect x="40" y="570" width="720" height="220" rx="18" fill="#C45C7A"/>
+    <text x="400" y="608" text-anchor="middle" fill="#fff" font-family="Segoe UI" font-size="16" font-weight="700">6. LLM adapte - Qwen2.5-1.5B-Instruct + LoRA r=16</text>
+    <text x="400" y="636" text-anchor="middle" fill="#F7E7D0" font-family="Segoe UI" font-size="13">poids du modele geles - on apprend seulement les matrices LoRA (q/k/v/o_proj)</text>
+    <text x="400" y="668" text-anchor="middle" fill="#fff" font-family="Consolas, monospace" font-size="13">&lt;tool_call&gt;{"name": "inspect_wardrobe"}&lt;/tool_call&gt;</text>
+    <text x="400" y="694" text-anchor="middle" fill="#F7E7D0" font-family="Segoe UI" font-size="12">boucle ReAct : tool_call  -  tool_result  -  final  (max 6 etapes)</text>
+    <text x="400" y="718" text-anchor="middle" fill="#F7E7D0" font-family="Segoe UI" font-size="12">data SFT : 25 trajectoires d'outils (pas des photos du catalogue)</text>
+    <text x="400" y="742" text-anchor="middle" fill="#F7E7D0" font-family="Segoe UI" font-size="12">notebook Colab : ml/notebooks/14_purchase_llm_lora.py</text>
+    <text x="400" y="766" text-anchor="middle" fill="#F7E7D0" font-family="Segoe UI" font-size="12">runtime : purchase_llm.py    tools : purchase_tools.py</text>
+  </g>
+
+  <polygon points="770,680 798,680 798,672 822,680 798,688 798,680" fill="#E8B4C8"/>
+
+  <g filter="url(#shadow)">
+    <rect x="840" y="570" width="400" height="220" rx="18" fill="#F7E7D0"/>
+    <text x="1040" y="612" text-anchor="middle" fill="#1A1B3A" font-family="Segoe UI" font-size="16" font-weight="700">7. Sortie (front mobile)</text>
+    <text x="1040" y="646" text-anchor="middle" fill="#5C4A5A" font-family="Segoe UI" font-size="13">verdict  -  score  -  explication</text>
+    <text x="1040" y="672" text-anchor="middle" fill="#5C4A5A" font-family="Segoe UI" font-size="13">alternatives tunisiennes + liens</text>
+    <text x="1040" y="698" text-anchor="middle" fill="#5C4A5A" font-family="Segoe UI" font-size="13">wishlist  -  historique  -  checkout</text>
+    <text x="1040" y="732" text-anchor="middle" fill="#C45C7A" font-family="Segoe UI" font-size="13" font-weight="700">recommande  |  a reflechir  |  non</text>
+    <text x="1040" y="760" text-anchor="middle" fill="#5C4A5A" font-family="Segoe UI" font-size="11">JSON structure reste deterministe</text>
+  </g>
+
+  <text x="640" y="830" text-anchor="middle" fill="#C9B8C8" font-family="Segoe UI" font-size="12">Tasnim - branche tasnim_purchase  |  extraction_agent.py  -  purchase_agent.py  -  purchase_tools.py  -  purchase_llm.py</text>
+</svg>
