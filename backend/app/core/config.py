@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -35,17 +36,33 @@ class Settings(BaseSettings):
     public_base_url: str = "http://localhost:8000"
 
     openweather_api_key: str | None = None
-    llm_api_key: str | None = None
-    llm_provider: str = "none"  # none | openai | mistral | llama
-    # Only needed to override the provider's default (openai/mistral have one; "llama"
-    # has no single standard host — self-hosted via vLLM/Ollama/Together, so both must
-    # be set explicitly for that provider). See app/agents/llm_agent.py.
+    llm_api_key: str | None = Field(default=None, repr=False)
+    llm_provider: str = "none"  # none | groq | gemini | ollama | openai | mistral | llama
+    # Optional provider overrides; llama requires both URL and model.
     llm_base_url: str | None = None
     llm_model: str | None = None
-    # Purchase-only: when true, the agent may replace the template explanation with
-    # a LoRA-adapted Qwen2.5-1.5B (if the adapter is on disk) or the same prompt
-    # via LLM_PROVIDER. Scores and tools stay deterministic either way.
+    # Purchase-only: LoRA-adapted Qwen2.5 tool-calling agent (or the same prompt via
+    # LLM_PROVIDER). Scores and sandbox tools stay deterministic either way.
     purchase_llm_enabled: bool = True
+    # Optional stronger model for conversation only; saved narratives keep llm_model.
+    llm_chat_model: str | None = None
+    llm_chat_fallback_model: str | None = None
+    llm_chat_timeout_seconds: float = Field(default=20.0, gt=0, le=60)
+    llm_timeout_seconds: float = Field(default=8.0, gt=0, le=60)
+    llm_max_retries: int = Field(default=1, ge=0, le=2)
+    llm_backoff_seconds: float = Field(default=0.25, ge=0, le=5)
+    llm_max_backoff_seconds: float = Field(default=2.0, ge=0, le=10)
+    llm_cache_ttl_seconds: float = Field(default=3600, ge=0, le=86400)
+    llm_failure_ttl_seconds: float = Field(default=15, ge=0, le=300)
+    llm_cache_max_entries: int = Field(default=512, ge=1, le=10000)
+
+    # RecommendationAgent enrichment kill-switches (3 axes: fine-tuning ranking,
+    # contextual RAG, prompt engineering + LLM). Default ON so the enriched path is
+    # used when artifacts/data are present; flip to false to force the exact legacy
+    # heuristic (ranking) or skip RAG retrieval (contextual_rag) without redeploying.
+    # The test conftest forces both off so existing tests run the fallback path.
+    ranking_enabled: bool = True
+    contextual_rag_enabled: bool = True
 
     # Virtual try-on (TryOnAgent) via Replicate's hosted API — no local GPU needed.
     # replicate_tryon_model_version has no safe hardcoded default: Replicate model

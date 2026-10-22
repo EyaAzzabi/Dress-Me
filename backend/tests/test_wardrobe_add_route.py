@@ -36,7 +36,11 @@ def setup(monkeypatch):
         "embedding": np.zeros(512),
     })
     monkeypatch.setattr(vector_store, "upsert_item_embedding", lambda *args, **kwargs: None)
-    monkeypatch.setattr(MetadataAgent, "remove_background", lambda *args: pytest.fail("original photo was altered"))
+    # raising=False: MetadataAgent has no remove_background today (background removal is the opt-in
+    # add_item(remove_bg=True) path); this guard fails the test if one is ever wired into the add route.
+    monkeypatch.setattr(
+        MetadataAgent, "remove_background", lambda *args: pytest.fail("original photo was altered"), raising=False
+    )
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_current_user] = lambda: user
     yield TestClient(app), analyzed_urls

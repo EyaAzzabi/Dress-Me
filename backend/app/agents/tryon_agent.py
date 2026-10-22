@@ -66,10 +66,56 @@ class TryOnAgent(BaseAgent):
             return StorageService().is_configured()  # the Space needs no key, but we keep its output
         return self._replicate_configured()
 
-    def run(self, *, person_image_url: str, garment_image_url: str, **kwargs: Any) -> dict[str, Any]:
+    def _resolve_to_local_file(self, url_or_path: str) -> str:
+        """Ensures the image is available as a local file on disk so that gradio_client
+        can upload its contents directly to the Hugging Face Space. Remote Hugging Face
+        servers cannot access private or localhost (http://localhost:8000/media/...) URLs.
+        """
+        import tempfile
+        from urllib.parse import urlparse
+
+        # 1. If it is already an existing local file path:
+        local_p = Path(url_or_path)
+        if local_p.is_file():
+            return str(local_p.resolve())
+
+        # 2. Check if it's stored in local_storage_dir:
+        parsed = urlparse(url_or_path)
+        filename = Path(parsed.path).name
+        if self.settings.local_storage_dir:
+            cand = Path(self.settings.local_storage_dir).resolve() / filename
+            if cand.is_file():
+                return str(cand)
+
+        # 3. Check well-known workspace directories:
+        backend_dir = Path(__file__).resolve().parents[2]
+        workspace_root = backend_dir.parent
+        for folder in [
+            backend_dir / "uploads",
+            workspace_root / "uploads",
+            workspace_root / "frontend" / "web" / "public" / "models",
+            workspace_root / "frontend" / "web" / "public",
+        ]:
+            cand = folder / filename
+            if cand.is_file():
+                return str(cand.resolve())
+
+        # 4. If it's an HTTP URL (remote or localhost fallback), download it to a temp file:
+        if parsed.scheme in ("http", "https"):
+            resp = httpx.get(url_or_path, timeout=30.0)
+            resp.raise_for_status()
+            suffix = Path(parsed.path).suffix or ".jpg"
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp.write(resp.content)
+            tmp.close()
+            return tmp.name
+
+        return url_or_path
+
+    def run(self, *, person_image_url: str, garment_image_url: str, category: str | None = None, **kwargs: Any) -> dict[str, Any]:
         if self.provider == "huggingface":
-            return self._hf_chain(person_image_url, [(garment_image_url, "upper_body")])
-        return self._try_on(person_image_url, garment_image_url, category=None)
+            return self._hf_chain(person_image_url, [(garment_image_url, category or "upper_body")])
+        return self._try_on(person_image_url, garment_image_url, category=category)
 
     def run_outfit(self, *, person_image_url: str, garments: list[tuple[str, str]]) -> dict[str, Any]:
         """Dresses the person in several garments by chaining single-garment try-ons:
@@ -104,11 +150,12 @@ class TryOnAgent(BaseAgent):
                 client_kwargs["hf_token"] = token
 
             client = Client(self.settings.hf_tryon_space, **client_kwargs)
-            current = person_image_url
+            current = self._resolve_to_local_file(person_image_url)
             for garment_url, category in garments:
+                garment_local = self._resolve_to_local_file(garment_url)
                 job = client.submit(
                     handle_file(current),
-                    handle_file(garment_url),
+                    handle_file(garment_local),
                     HF_CATEGORY.get(category, "Upper-body"),
                     1,  # images
                     20,  # steps

@@ -30,7 +30,7 @@ class StyleProfileAgent(BaseAgent):
         self.db = db
         self.llm_agent = LLMAgent()
 
-    def run(self, *, user_id: uuid.UUID, **kwargs: Any) -> dict[str, Any]:
+    def run(self, *, user_id: uuid.UUID, include_narrative: bool = True, **kwargs: Any) -> dict[str, Any]:
         items = self.db.query(ClothingItem).filter(ClothingItem.owner_id == user_id).all()
 
         if not items:
@@ -53,11 +53,14 @@ class StyleProfileAgent(BaseAgent):
             "favorite_styles": [style for style, _ in style_counts.most_common(TOP_N)],
         }
 
+        if not include_narrative:
+            return {**profile, "narrative": None}
+
         narrative = self.llm_agent.run(
             context=profile,
+            cache_scope=str(user_id),
             instruction=(
-                "In two or three sentences, describe this user's personal style based "
-                "only on the wardrobe facts given."
+                "Décris ce profil en français uniquement à partir des faits de la garde-robe."
             ),
         )["explanation"]
         profile["narrative"] = narrative

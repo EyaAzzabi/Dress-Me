@@ -10,8 +10,10 @@ def _agent_with_settings(monkeypatch, **overrides) -> TryOnAgent:
     overrides.setdefault("tryon_provider", "replicate")
     overrides.setdefault("replicate_api_token", None)
     overrides.setdefault("replicate_tryon_model_version", None)
-    settings = Settings(**overrides)
+    settings = Settings(_env_file=None, **overrides)
     monkeypatch.setattr("app.agents.tryon_agent.get_settings", lambda: settings)
+    # The nested storage service must see the same isolated test settings.
+    monkeypatch.setattr("app.services.storage.get_settings", lambda: settings)
     return TryOnAgent()
 
 
@@ -135,6 +137,8 @@ def test_huggingface_chain_dresses_garments_in_order_and_stores_the_result(monke
 
     monkeypatch.setattr(gradio_client, "Client", _Client)
     monkeypatch.setattr(gradio_client, "handle_file", lambda path: f"file:{path}")
+    # The agent downloads URLs to local files before handing them to Gradio; these URLs are fake.
+    monkeypatch.setattr(agent, "_resolve_to_local_file", lambda url: url)
 
     result = agent.run_outfit(
         person_image_url="https://x/avatar.jpg",
