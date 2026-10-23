@@ -12,6 +12,18 @@ docker compose up --build
 
 Backend will be at http://localhost:8000, docs at http://localhost:8000/docs.
 
+### Use Supabase for the backend database
+
+Set `DATABASE_URL` in `backend/.env` to the Supabase Postgres connection string. From
+this `infra` directory, start the backend with the opt-in Compose override:
+
+```bash
+docker compose --env-file ../backend/.env -f docker-compose.yml -f docker-compose.supabase.yml up --build -d --no-deps backend
+```
+
+The regular `docker compose up --build` command continues to use the local Docker
+Postgres database.
+
 ### Database migrations
 
 Tables aren't created automatically — run Alembic once Postgres is up:

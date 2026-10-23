@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.agents.orchestrator import AgentOrchestrator
+from app.agents.llm_agent import LLMConfigurationError
+from app.agents.workflow_service import AgentWorkflowService
 from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.purchase_history import PurchaseHistoryEntry
@@ -26,6 +27,8 @@ from app.services.catalog_index import CatalogIndex
 from app.services.storage import StorageService
 
 router = APIRouter(prefix="/purchase", tags=["purchase"])
+# Compatibility alias for existing route tests and integrations.
+AgentOrchestrator = AgentWorkflowService
 
 
 @router.post("/extract", response_model=GarmentExtractionResult)
@@ -38,7 +41,7 @@ def extract_garments(
     pass to /purchase/check."""
     if not StorageService().is_configured():
         raise HTTPException(status_code=503, detail="Image storage isn't configured on this server.")
-    return AgentOrchestrator(db).extract_garments(image_url=payload.image_url)
+    return AgentWorkflowService(db).extract_garments(image_url=payload.image_url)
 
 
 @router.post("/check", response_model=PurchaseCheckResult)
@@ -47,11 +50,14 @@ def check_purchase(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    orchestrator = AgentOrchestrator(db)
-    result = orchestrator.evaluate_purchase(
-        user_id=current_user.id, image_url=payload.image_url, price=payload.price,
-        category=payload.category,
-    )
+    workflow_service = AgentWorkflowService(db)
+    try:
+        result = workflow_service.evaluate_purchase(
+            user_id=current_user.id, image_url=payload.image_url, price=payload.price,
+            category=payload.category,
+        )
+    except LLMConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if result["item"]["category"] != "hors_perimetre":
         result = PurchaseCheckResult(**result).model_dump(mode="json")
         db.add(PurchaseHistoryEntry(

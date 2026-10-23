@@ -3,7 +3,8 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.agents.orchestrator import AgentOrchestrator
+from app.agents.workflow_service import AgentWorkflowService
+from app.agents.llm_agent import LLMConfigurationError
 from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.clothing_item import ClothingItem
@@ -42,13 +43,16 @@ def create_packing_list(
     if payload.duration_days < 1:
         raise HTTPException(status_code=422, detail="duration_days must be at least 1.")
 
-    packing_list = AgentOrchestrator(db).plan_trip(
-        user_id=current_user.id,
-        destination=payload.destination,
-        duration_days=payload.duration_days,
-        trip_type=payload.trip_type,
-        start_date=payload.start_date,
-    )
+    try:
+        packing_list = AgentWorkflowService(db).plan_trip(
+            user_id=current_user.id,
+            destination=payload.destination,
+            duration_days=payload.duration_days,
+            trip_type=payload.trip_type,
+            start_date=payload.start_date,
+        )
+    except LLMConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return _resolve(packing_list, db)
 
 

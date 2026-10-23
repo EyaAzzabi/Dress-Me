@@ -1,3 +1,6 @@
+import logging
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -10,6 +13,7 @@ from app.schemas.tryon import AvatarSet, TryOnRequest, TryOnResult
 
 router = APIRouter(prefix="/tryon", tags=["tryon"])
 tryon_agent = TryOnAgent()
+logger = logging.getLogger(__name__)
 
 
 @router.put("/avatar", response_model=AvatarSet)
@@ -80,4 +84,17 @@ def try_on_garment(
             )
     except (RuntimeError, TimeoutError) as exc:
         # Upstream (Replicate / HF) failure
+        detail = re.sub(r"https?://\S+", "[URL]", str(exc))
+        for secret in (
+            tryon_agent.settings.hf_token,
+            tryon_agent.settings.replicate_api_token,
+        ):
+            if secret:
+                detail = detail.replace(secret, "[REDACTED]")
+        logger.warning(
+            "tryon_provider_failure provider=%s error_type=%s detail=%s",
+            tryon_agent.provider,
+            type(exc).__name__,
+            detail[:500],
+        )
         raise HTTPException(status_code=502, detail=str(exc))

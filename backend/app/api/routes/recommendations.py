@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.agents.orchestrator import AgentOrchestrator
+from app.agents.workflow_service import AgentWorkflowService
+from app.agents.llm_agent import LLMConfigurationError
 from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.outfit import Outfit
@@ -17,19 +18,22 @@ def recommend_outfits(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    orchestrator = AgentOrchestrator(db)
-    return orchestrator.recommend_outfits(
-        user_id=current_user.id,
-        occasion=payload.occasion,
-        weather=payload.weather,
-        season=payload.season,
-        city=payload.city,
-    )
+    workflow_service = AgentWorkflowService(db)
+    try:
+        return workflow_service.recommend_outfits(
+            user_id=current_user.id,
+            occasion=payload.occasion,
+            weather=payload.weather,
+            season=payload.season,
+            city=payload.city,
+        )
+    except LLMConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/outfits", response_model=list[OutfitRead])
 def list_outfits(
     current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> list[Outfit]:
-    orchestrator = AgentOrchestrator(db)
-    return orchestrator.list_outfits(user_id=current_user.id)
+    workflow_service = AgentWorkflowService(db)
+    return workflow_service.list_outfits(user_id=current_user.id)

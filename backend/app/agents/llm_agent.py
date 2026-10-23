@@ -55,6 +55,10 @@ class _Entry:
     failure: str | None = None
 
 
+class LLMConfigurationError(ValueError):
+    """Raised when a LangGraph workflow cannot initialize its configured LLM."""
+
+
 class LLMAgent(BaseAgent):
     """Preserves run(context=..., instruction=...) -> {'explanation': str | None}.
 
@@ -191,6 +195,32 @@ class LLMAgent(BaseAgent):
         if url.scheme != "https" and not (url.scheme == "http" and url.hostname in {"localhost", "127.0.0.1", "::1"}):
             raise ValueError("Use HTTPS or loopback HTTP for local inference")
         return base.rstrip("/"), model
+
+    def as_chat_model(self):
+        """Build the configured chat model used by LangGraph supervisors."""
+        if self.settings.llm_provider == "none":
+            raise LLMConfigurationError(
+                "LangGraph workflows need an LLM. Set LLM_PROVIDER and its credentials."
+            )
+        try:
+            base_url, model = self._resolve_provider()
+        except ValueError as exc:
+            raise LLMConfigurationError(str(exc)) from exc
+        if not self.settings.llm_api_key and self.settings.llm_provider not in {"ollama", "llama"}:
+            raise LLMConfigurationError(
+                f"LLM_API_KEY is required when LLM_PROVIDER={self.settings.llm_provider!r}."
+            )
+
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            model=model,
+            api_key=self.settings.llm_api_key or "ollama",
+            base_url=base_url,
+            temperature=0,
+            timeout=20.0,
+            max_retries=1,
+        )
 
     def run(self, *, context: dict[str, Any], instruction: str,
             task: str = "style_profile", cache_scope: str = "") -> dict[str, Any]:

@@ -1,0 +1,4 @@
+services:
+  backend:
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in backend/.env before using this override}

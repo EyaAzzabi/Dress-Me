@@ -4,9 +4,11 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
+from app.agents.llm_agent import LLMConfigurationError
 from app.agents.metadata_agent import MetadataAgent
 from app.agents.vision_agent import VisionAgent
 from app.agents.wardrobe_ingestion_agent import WardrobeIngestionAgent
+from app.agents.workflow_service import AgentWorkflowService
 from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.clothing_item import ClothingItem
@@ -90,39 +92,17 @@ def add_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ClothingItem:
-    agent = WardrobeIngestionAgent(db=db, vision_agent=vision_agent)
     try:
-        attributes = agent.run(image_url=payload.image_url, user_id=current_user.id)
+        return AgentWorkflowService(db).add_wardrobe_item(
+            user_id=current_user.id,
+            image_url=payload.image_url,
+            season=payload.season,
+            category=payload.category,
+        )
+    except LLMConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if attributes["category"] == "hors_perimetre":
-        raise HTTPException(
-            status_code=422,
-            detail="This photo doesn't look like a clothing item — try a clearer photo of the item alone.",
-        )
-    if attributes.get("category_uncertain") and payload.category is None:
-        # Most often a photo of several pieces at once. Not an error in the request, but
-        # saving a wrong category would quietly spoil outfit suggestions — so ask, and let
-        # the client resend the same photo with the owner's `category`.
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "low_category_confidence",
-                "message": (
-                    "On n'est pas sûr de la catégorie de cette pièce — la photo montre peut-être "
-                    "plusieurs vêtements. Confirme la catégorie, ou ajoute une photo d'une seule pièce."
-                ),
-                "suggested_category": attributes["category"],
-                "confidence": attributes["confidence"]["category"],
-            },
-        )
-    return MetadataAgent(db).add_item(
-        user_id=current_user.id,
-        image_url=payload.image_url,
-        attributes=attributes,
-        season=payload.season,
-        category=payload.category,
-    )
+        raise HTTPException(status_code=422, detail=getattr(exc, "detail", str(exc))) from exc
 
 
 @router.patch("/{item_id}", response_model=ClothingItemRead)

@@ -755,8 +755,18 @@ export default function App() {
     setBusy("avatar");
     setError("");
     try {
-      await api.put("/tryon/avatar", { image_url: imageUrl });
-      setUser((current) => current ? { ...current, avatar_photo_url: imageUrl } : current);
+      const response = await fetch(imageUrl);
+      if (!response.ok) throw new Error("Impossible de charger le mannequin sélectionné.");
+      const imageBlob = await response.blob();
+      if (!imageBlob.type.startsWith("image/")) {
+        throw new Error("Le fichier du mannequin sélectionné n’est pas une image valide.");
+      }
+      const filename = imageUrl.split("/").pop() || "mannequin.jpg";
+      const storedImageUrl = await uploadPhoto(
+        new File([imageBlob], filename, { type: imageBlob.type }),
+      );
+      await api.put("/tryon/avatar", { image_url: storedImageUrl });
+      setUser((current) => current ? { ...current, avatar_photo_url: storedImageUrl } : current);
       setNotice("Mannequin sélectionné avec succès ! ✨");
     } catch (cause: unknown) {
       reportError(cause);

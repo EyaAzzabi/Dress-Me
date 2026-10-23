@@ -1,4 +1,5 @@
 import { isAxiosError } from "axios";
+import * as ImageManipulator from "expo-image-manipulator";
 import { Platform } from "react-native";
 
 import { apiClient } from "@/api/client";
@@ -15,10 +16,14 @@ export function listWardrobeItems() {
  * over HTTP, so a local device URI isn't usable directly.
  */
 export async function uploadPhoto(localUri: string) {
-  const filename = localUri.split("/").pop() ?? "photo.jpg";
-  const extensionMatch = /\.(\w+)$/.exec(filename);
-  const extension = extensionMatch ? extensionMatch[1].toLowerCase() : "jpg";
-  const mimeType = extension === "png" ? "image/png" : "image/jpeg";
+  // Expo SDK 54+ can return original HEIC/AVIF assets from the picker. Convert the
+  // bytes themselves to JPEG; changing only the filename/MIME type would leave an
+  // unsupported image format for the backend's Pillow pipeline.
+  const jpeg = await ImageManipulator.manipulateAsync(localUri, [], {
+    compress: 0.85,
+    format: ImageManipulator.SaveFormat.JPEG,
+  });
+  const filename = "photo.jpg";
 
   const formData = new FormData();
   if (Platform.OS === "web") {
@@ -26,10 +31,10 @@ export async function uploadPhoto(localUri: string) {
     // FormData delegates straight to the browser's — which needs a real
     // File/Blob, not the {uri, name, type} placeholder native RN's FormData
     // polyfill accepts.
-    const blob = await (await fetch(localUri)).blob();
+    const blob = await (await fetch(jpeg.uri)).blob();
     formData.append("file", blob, filename);
   } else {
-    formData.append("file", { uri: localUri, name: filename, type: mimeType } as unknown as Blob);
+    formData.append("file", { uri: jpeg.uri, name: filename, type: "image/jpeg" } as unknown as Blob);
   }
 
   return apiClient

@@ -11,7 +11,7 @@ Project brief: `docs/DressMe.pdf` · architecture diagram: `docs/DressMe_archite
 
 ```
 backend/    FastAPI service: auth, wardrobe / outfits / calendar / packing / purchase / try-on
-            APIs, plus the agent orchestrator (app/agents/)
+            APIs, specialist agents and LangGraph supervisors (app/agents/)
 frontend/
   mobile/   Expo / React Native app
   web/      React + Vite web app (same features as mobile)
@@ -23,8 +23,10 @@ docs/       project brief, personas, architecture
 
 ## Architecture
 
-The clients call a REST API (`/api/v1`). Fashion intelligence lives in specialized agents
-under `backend/app/agents/`, coordinated by `AgentOrchestrator`:
+The clients call a REST API (`/api/v1`). For each multi-agent request, a LangGraph supervisor
+uses the configured LLM to select and call specialist tools. `AgentWorkflowService` supplies
+the graph with the authenticated database session and specialist agents; it does not choose
+their execution order.
 
 | Agent | What it does |
 |---|---|
@@ -36,7 +38,20 @@ under `backend/app/agents/`, coordinated by `AgentOrchestrator`:
 | **PackingAgent** | Suitcase list from trip length, type and season; always includes outfits already planned in the calendar. |
 | **PurchaseAgent** | Checks a new item against the wardrobe (needs Pinecone). |
 | **TryOnAgent** | Virtual try-on (free Hugging Face Space, or Replicate). Used by the Try-on screen and the calendar's avatar render. |
-| **LLMAgent** | Optional natural-language explanations. Off by default (`LLM_PROVIDER=none`). |
+| **LLMAgent** | Supplies the chat model used by LangGraph supervisors and optional profile narratives. |
+
+LangGraph supervises outfit recommendations, trip packing, purchase checks, and adding a
+clothing item. The REST endpoint identifies the requested operation; within that operation,
+the LLM selects and sequences the available tools:
+
+- Outfit graph: `ContextAgent`, `StyleProfileAgent`, `MetadataAgent` (wardrobe), and `RecommendationAgent`.
+- Wardrobe-add graph: `VisionAgent` and `MetadataAgent`.
+- Purchase graph: `VisionAgent`, `MetadataAgent`, and `PurchaseAgent`.
+- Packing graph: trip context, `MetadataAgent`, and `PackingAgent`.
+
+`LLMAgent.as_chat_model()` provides the supervisor model for these graphs. There is no
+`WardrobeAgent` class in the code; `MetadataAgent` handles wardrobe operations. Single-agent
+features such as garment extraction and virtual try-on call their specialist directly.
 
 Data: PostgreSQL (users, items, outfits, calendar, packing, wear log), Pinecone (item
 embeddings), S3-compatible storage or a local folder (photos).
@@ -140,7 +155,7 @@ the ones you will actually touch:
 | `OPENWEATHER_API_KEY` | weather by city | Optional; without it weather stays empty. |
 | `TRYON_PROVIDER`, `HF_TOKEN` | virtual try-on / calendar avatar | `auto` uses Replicate if its keys are set, otherwise a **free** Hugging Face Space. `HF_TOKEN` (free account, read token) is optional but raises the daily GPU quota. Needs `LOCAL_STORAGE_DIR` too. |
 | `REPLICATE_API_TOKEN`, `REPLICATE_TRYON_MODEL_VERSION` | try-on via Replicate (paid) | Optional. |
-| `LLM_PROVIDER`, `LLM_API_KEY` | AI-written explanations | Optional, default `none`. |
+| `LLM_PROVIDER`, `LLM_API_KEY` | LangGraph supervisor and AI-written explanations | Required for multi-agent workflows; `none` disables the supervisor. |
 | `CORS_ORIGINS` | browser clients | Add your deployed web origin. |
 
 ## Tests
@@ -167,8 +182,8 @@ python -m pytest tests -q
   Test your migration both ways: `alembic downgrade -1` then `alembic upgrade head`.
 - List columns (colors, item ids) are stored as JSON text via the type decorators in the
   models, not as native Postgres arrays — keep it that way so the models also work on SQLite.
-- New agent behavior goes in `backend/app/agents/`; routes in `backend/app/api/routes/` stay
-  thin and call the agents or the orchestrator.
+- New multi-agent behavior goes in a LangGraph supervisor under `backend/app/agents/`;
+  API routes stay thin and call the workflow service or a single specialist agent.
 - Run the test suite before pushing, and check both front ends type-check.
 
 ## Behaviors worth knowing
@@ -200,16 +215,15 @@ python -m pytest tests -q
 ## Where we are / what's next
 
 Done: wardrobe with confidence-aware vision analysis, season handling, usage tracking,
-season-aware packing, calendar with avatar render, free try-on provider.
+season-aware packing, calendar with avatar render, free try-on provider, and LangGraph
+supervisors for outfit recommendations, trip packing, purchase checks, and wardrobe additions.
 
 Suggested next work, roughly by value:
 
 1. **RecommendationAgent**: today `occasion` and `weather` only appear in the explanation text
    and don't influence the choice — filter/rank by them, add color-harmony rules and variety
    across the suggested outfits, and add a small hand-labeled set to measure quality.
-2. **LLMAgent**: switch it on with a free provider (Mistral free tier, or Llama via Ollama:
-   `LLM_PROVIDER=llama`, `LLM_BASE_URL=http://localhost:11434/v1`, `LLM_MODEL=llama3`).
-3. **PurchaseAgent / StyleProfileAgent**: review and improve (not yet revisited).
-4. **Calibration with real uploads**: confidence thresholds (category, style, season) were set
+2. **PurchaseAgent / StyleProfileAgent**: review and improve (not yet revisited).
+3. **Calibration with real uploads**: confidence thresholds (category, style, season) were set
    on catalog photos.
-5. Route the calendar endpoints through the orchestrator (there is no calendar agent yet).
+4. Add a LangGraph workflow for calendar actions if they grow beyond the current single try-on specialist.
