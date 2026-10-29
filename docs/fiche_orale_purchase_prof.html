@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<title>Fiche orale Purchase — DressMe (ESPRIT)</title>
+<style>
+  @page { size: A4; margin: 16mm 14mm; }
+  body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.35; color: #111; }
+  h1 { font-size: 18pt; margin: 0 0 6pt; }
+  h2 { font-size: 14pt; margin: 16pt 0 8pt; border-bottom: 1.5pt solid #222; page-break-before: always; }
+  h2.first { page-break-before: avoid; }
+  h3 { font-size: 12.5pt; margin: 12pt 0 6pt; color: #1a3a5c; }
+  h4 { font-size: 11pt; margin: 8pt 0 3pt; }
+  p { margin: 0 0 5pt; }
+  ul, ol { margin: 3pt 0 8pt 18pt; }
+  li { margin: 0 0 3pt; }
+  .meta { font-size: 10pt; color: #444; margin-bottom: 12pt; }
+  .box { background: #f4f6f8; border-left: 3pt solid #1a3a5c; padding: 6pt 8pt; margin: 8pt 0; }
+  .warn { background: #fff6e8; border-left: 3pt solid #b36b00; padding: 6pt 8pt; margin: 8pt 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 10pt; margin: 6pt 0 10pt; }
+  th, td { border: 0.4pt solid #888; padding: 4pt 5pt; vertical-align: top; }
+  th { background: #e8eef4; text-align: left; }
+  code { font-family: Consolas, monospace; font-size: 9.5pt; }
+  .small { font-size: 10pt; color: #333; }
+</style>
+</head>
+<body>
+
+<h1>Fiche orale — Agent Purchase DressMe</h1>
+<p class="meta">ESPRIT · Qwen2.5-1.5B-Instruct + LoRA · 5 outils · MCP<br>
+Phrases courtes, à la première personne. À lire à voix haute.</p>
+
+<div class="warn">
+<strong>Dire en premier.</strong> Le score d’achat n’est pas le LLM. Le LLM appelle des outils et rédige. La fidélité est à 0 %. Le parseur aide le format. MCP n’est pas encore dans la boucle de l’agent. La loss Colab n’est pas dans le notebook Git.
+</div>
+
+<!-- ========== PARTIE 1 ========== -->
+<h2 class="first">Partie 1 — termes A à E</h2>
+
+<h3>A. Agent et orchestration</h3>
+<h4>1. Définition</h4>
+<p>Un agent, c’est un programme qui agit pour un but précis.</p>
+<p>L’orchestration, c’est le chef d’orchestre : il dit qui joue, et quand.</p>
+<h4>2. Comment j’ai pensé</h4>
+<p>Le problème : la vision, le score et le texte ne doivent pas se mélanger.</p>
+<p>J’ai choisi un chef plus un agent d’achat.</p>
+<p>J’ai écarté un seul gros modèle pour tout : trop opaque.</p>
+<p>Le score reste une formule. Le petit LLM appelle les outils, puis rédige.</p>
+<h4>3. Comment dans le code</h4>
+<p><code>evaluate_purchase</code> lance la vision, puis la garde-robe, puis l’achat.</p>
+<p><code>PurchaseAgent.run</code> calcule le score avec quatre poids fixes.</p>
+<p>Ensuite <code>run_agent</code> peut remplacer seulement le texte d’explication.</p>
+<h4>4. Où je montre</h4>
+<p><code>backend/app/agents/orchestrator.py</code> 37–50 et 220–254.</p>
+<p><code>backend/app/agents/purchase_agent.py</code> 22 (poids 40 / 25 / 20 / 15) et 127–178.</p>
+<h4>5. Ce que je dis</h4>
+<p>Ici, je ne laisse pas le LLM décider le score. Le score est une moyenne pondérée, toujours la même. Le LoRA n’a le droit que d’appeler des outils. Puis il rédige deux à quatre phrases en français. Si le LoRA n’a pas tourné, un autre agent peut expliquer. Le chef d’orchestre, c’est <code>evaluate_purchase</code>.</p>
+<h4>6. Si elle me questionne</h4>
+<p><em>Le LLM choisit-il d’acheter ?</em> Non. Le score est calculé avant, sans lui.</p>
+<p><em>Piège : alors pourquoi un LLM ?</em> Pour le texte et les appels d’outils, pas le verdict. Limite : si le LoRA échoue, le score reste, le texte redevient <code>_explain</code>.</p>
+
+<h3>B. LLM choisi pour chaque agent</h3>
+<h4>1. Définition</h4>
+<p>Un LLM, c’est un modèle qui prédit le mot suivant, comme un clavier intelligent.</p>
+<p>FashionCLIP et SegFormer regardent des pixels. Ce ne sont pas des LLM.</p>
+<h4>2. Comment j’ai pensé</h4>
+<p>Le problème : j’avais un GPU T4 gratuit, pas une grosse machine.</p>
+<p>J’ai choisi Qwen2.5-1.5B-Instruct : petit, français, licence Apache.</p>
+<p>J’ai écarté GPT-4 pour l’achat : payant, et je ne peux pas le fine-tuner ici.</p>
+<p>Pour la vision, j’ai écarté un LLM : une image n’est pas du texte.</p>
+<h4>3. Comment dans le code</h4>
+<p>Purchase charge Qwen plus l’adapter LoRA.</p>
+<p>La vision charge FashionCLIP, puis SegFormer pour découper le vêtement.</p>
+<p>LLMAgent parle à une API : Groq, Gemini, Ollama, OpenAI, Mistral, ou rien.</p>
+<h4>4. Où je montre</h4>
+<p><code>purchase_llm.py</code> 27 · <code>finetune_purchase_llm.py</code> 7 (T4) · <code>vision_model.py</code> 40, 100–107 · <code>garment_segmentation.py</code> 23, 74–78 · <code>llm_agent.py</code> 40–47 · <code>config.py</code> 40 (<code>none</code>).</p>
+<h4>5. Ce que je dis</h4>
+<p>Pour l’achat, j’ai pris Qwen un virgule cinq milliards de paramètres. Il tient sur un T4 Colab gratuit. La vision n’est pas un LLM : FashionCLIP encode, SegFormer découpe. Les textes du profil passent par LLMAgent, une API au choix. Par défaut cette API est éteinte. Donc Purchase peut tourner tout seul, en local, avec LoRA.</p>
+<h4>6. Si elle me questionne</h4>
+<p><em>Pourquoi pas Llama 70B ?</em> Trop gros pour T4. Je n’aurais pas pu fine-tuner.</p>
+<p><em>Piège : 1.5B n’est-il pas trop faible ?</em> Oui, il hallucine facilement. C’est pour ça que le sandbox bloque les outils, et que le score n’est pas au LLM.</p>
+
+<h3>C. Prompt engineering</h3>
+<h4>1. Définition</h4>
+<p>Le prompt, c’est la consigne écrite qu’on donne au modèle.</p>
+<p>Bien le rédiger, c’est comme un brief clair à un stagiaire.</p>
+<h4>2. Comment j’ai pensé</h4>
+<p>Le problème : le modèle invente des prix s’il n’a pas de cadre.</p>
+<p>J’ai mis un rôle, une interdiction, une liste d’outils, un format, un ordre.</p>
+<p>J’ai écarté le few-shot à l’inférence : ça allonge le prompt.</p>
+<p>Les exemples sont dans l’entraînement, pas recopiés à chaque achat.</p>
+<h4>3. Comment dans le code</h4>
+<p><code>SYSTEM_PROMPT</code> fixe le rôle et l’interdiction d’inventer.</p>
+<p><code>_TOOL_LIST</code> injecte les cinq noms depuis <code>TOOL_SPECS</code>.</p>
+<p>Le format impose <code>&lt;tool_call&gt;</code> puis <code>&lt;final&gt;</code>.</p>
+<p>L’entrée user est un JSON. La boucle outil puis résultat, c’est du ReAct.</p>
+<h4>4. Où je montre</h4>
+<p><code>backend/app/ml/purchase_llm.py</code> 30–46, 94–97, 100–116.</p>
+<h4>5. Ce que je dis</h4>
+<p>Je commence par : tu es l’agent d’achat DressMe. Tu n’as pas le droit d’inventer un prix, un score, une marque. Je colle la liste des cinq outils, rien d’autre. Tu dois répondre dans des balises, une action à la fois. L’ordre : garde-robe, catalogue, prix, marques, coût par port, puis final. Je n’ajoute pas d’exemples au runtime : ils sont déjà dans le fine-tuning.</p>
+<h4>6. Si elle me questionne</h4>
+<p><em>C’est quoi ReAct ?</em> Agir, voir le résultat, puis agir encore, jusqu’à la réponse.</p>
+<p><em>Piège : le prompt suffit-il sans LoRA ?</em> Non. Sans adapter, le petit Qwen rate souvent les balises.</p>
+
+<h3>D. Tool schema</h3>
+<h4>1. Définition</h4>
+<p>Un tool schema, c’est la fiche d’un outil : nom, rôle, parfois des arguments.</p>
+<p>Comme la notice d’un appareil : ce qu’il fait, et quels boutons.</p>
+<h4>2. Comment j’ai pensé</h4>
+<p>Le problème : le LLM ne doit voir que cinq actions, pas Python.</p>
+<p>J’ai choisi un schéma minimal : nom plus une phrase.</p>
+<p>J’ai écarté un gros JSON Schema : quatre outils n’ont aucun argument.</p>
+<p>MCP ajoute le schéma là où il y a un argument : <code>limit</code>.</p>
+<h4>3. Comment dans le code</h4>
+<p><code>TOOL_SPECS</code> a cinq dictionnaires : <code>name</code> et <code>description</code>.</p>
+<p><code>search_tunisian_catalog</code> accepte <code>limit</code>, défaut vingt.</p>
+<p>FastMCP fabrique le schéma JSON de cet argument.</p>
+<h4>4. Où je montre</h4>
+<p><code>purchase_tools.py</code> 17–38 et 103 · <code>purchase_server.py</code> 45–67.</p>
+<p class="small">Le JSON MCP exact de <code>inputSchema</code> : à vérifier en lançant la démo.</p>
+<h4>5. Ce que je dis</h4>
+<p>Dans le code métier, le schéma est volontairement petit. Nom, plus une phrase, c’est tout. Quatre outils n’ont pas de paramètre. Le cinquième a <code>limit</code>, un entier, vingt par défaut. MCP reprend les vrais noms et les vraies descriptions. Il expose <code>limit</code> parce que Python l’a typé.</p>
+<h4>6. Si elle me questionne</h4>
+<p><em>Pourquoi pas les types de tous les champs ?</em> Parce que les autres fonctions n’ont pas d’arguments.</p>
+<p><em>Piège : un schéma sans types, c’est faible ?</em> Oui. La vraie porte, c’est la liste blanche, pas le schéma.</p>
+
+<h3>E. Sandbox / liste blanche</h3>
+<h4>1. Définition</h4>
+<p>Une liste blanche, c’est : seuls ces noms-là ont le droit de passer.</p>
+<p>Le sandbox, c’est le bac à sable : pas de Python, pas d’internet.</p>
+<h4>2. Comment j’ai pensé</h4>
+<p>Le problème : un LLM peut écrire <code>os_system</code> ou <code>eval</code>.</p>
+<p>Le prompt et le LoRA restent probabilistes : ça peut encore arriver.</p>
+<p>Le sandbox est déterministe : nom inconnu, erreur, point final.</p>
+<h4>3. Comment dans le code</h4>
+<p><code>call</code> cherche le nom dans un dictionnaire des cinq outils.</p>
+<p>Si le nom manque, il lève <code>UnknownPurchaseTool</code>.</p>
+<p>Les vecteurs restent dans le sandbox. Le modèle ne voit que le JSON.</p>
+<h4>4. Où je montre</h4>
+<p><code>purchase_tools.py</code> 1–5, 41–42, 53–55, 78–82.</p>
+<h4>5. Ce que je dis</h4>
+<p>Le prompt, c’est un conseil. Le modèle peut désobéir. Le fine-tuning, c’est une habitude. Il peut encore se tromper. Le sandbox, c’est une porte fermée à clé. Cinq noms passent. Un sixième nom lève une erreur. Donc la sécurité ne repose pas sur la politesse du modèle.</p>
+<h4>6. Si elle me questionne</h4>
+<p><em>Différence prompt / LoRA / sandbox ?</em> Conseil, habitude, puis interdiction réelle.</p>
+<p><em>Piège : le sandbox valide-t-il les types ?</em> Non. Il valide le nom. C’est une limite.</p>
+
+<!-- ========== PARTIE 2 ========== -->
+<h2>Partie 2 — termes F à J</h2>
+
+<h3>F. RAG</h3>
+<h4>1. Définition</h4>
+<p>RAG, c’est aller chercher une info, puis la coller dans le texte du modèle.</p>
+<p>Comme ouvrir un classeur avant de répondre, au lieu d’inventer de mémoire.</p>
+<h4>2. Comment j’ai pensé</h4>
+<p>Je veux des produits tunisiens qui se ressemblent, pas des mots.</p>
+<p>J’ai choisi un kNN visuel. J’ai écarté un RAG texte dans Purchase.</p>
+<p>Le RAG texte appartient à l’agent de recommandation.</p>
+<h4>3. Comment dans le code</h4>
+<p>Les produits sont dans <code>catalog_embeddings.npz</code>.</p>
+<p><code>search</code> fait un produit scalaire, puis prend les meilleurs scores.</p>
+<p>Le vecteur n’entre jamais dans le prompt. Les outils renvoient du JSON.</p>
+<h4>4. Où je montre</h4>
+<p><code>catalog_index.py</code> 1–7, 23, 80–88, 143–155 · <code>vision_model.py</code> 138 (512-d) · <code>purchase_llm.py</code> 10 · <code>context_retrieval.py</code> 1–3, 53.</p>
+<h4>5. Ce que je dis</h4>
+<p>Chez moi, ce n’est pas un RAG classique avec des phrases. C’est un kNN visuel : je cherche les habits qui se ressemblent. FashionCLIP donne un vecteur de cinq cent douze nombres. Le LLM ne voit que les JSON des outils, jamais le vecteur. Le vrai RAG texte, c’est l’autre agent, Recommendation.</p>
+<h4>6. Si elle me questionne</h4>
+<p><em>C’est bien du RAG ?</em> C’est de la récupération, oui, mais visuelle, pas textuelle.</p>
+<p><em>Piège : pourquoi dire RAG ?</em> On injecte le résultat des outils. Ce n’est pas un index de documents. Je le dis franchement.</p>
+
+<h3>G. Fine-tuning</h3>
+<h4>1. Définition</h4>
+<p>Fine-tuner, c’est ré-entraîner un modèle déjà savant sur mon petit métier.</p>
+<p>Comme un cuisinier diplômé qui apprend ensuite ma carte.</p>
+<h4>2. Comment j’ai pensé</h4>
+<p>Qwen ne connaît pas mes balises ni mes cinq outils.</p>
+<p>Full fine-tuning : trop lourd. Prompt tuning : trop faible pour le ReAct.</p>
+<p>LoRA : petites matrices, Qwen gelé, ça tient sur T4.</p>
+<h4>3. Comment dans le code</h4>
+<p><code>save_pretrained</code> sauve l’adapter, pas tout Qwen.</p>
+<p><code>PeftModel.from_pretrained</code> pose l’adapter par-dessus la base.</p>
+<p>Je ne fusionne pas. Je peux éteindre l’adapter pour comparer.</p>
+<h4>4. Où je montre</h4>
+<p><code>finetune_purchase_llm.py</code> 2–4, 42–46, 61 · <code>purchase_llm.py</code> 170–172 · <code>eval_purchase.py</code> 10, 296 (<code>disable_adapter</code>).</p>
+<h4>5. Ce que je dis</h4>
+<p>Je n’ai pas réécrit Qwen. J’ai collé un petit adaptateur LoRA. L’adapter est un fichier à part. Je charge Qwen, puis je pose l’adapter par-dessus. Je ne merge pas. Je peux comparer avec et sans. Le score d’achat ne passe pas par cet entraînement.</p>
+<h4>6. Si elle me questionne</h4>
+<p><em>Pourquoi pas tout ré-entraîner ?</em> Pas de VRAM, et je perdrais le français général.</p>
+<p><em>Piège : LoRA a-t-il appris les prix ?</em> Non. Il a appris le format d’appel. Les chiffres viennent des outils.</p>
+
+<h3>H. Dataset SFT</h3>
+<h4>1. Définition</h4>
+<p>SFT, c’est l’apprentissage par imitation : je montre le dialogue idéal.</p>
+<p>Comme un script de théâtre : le modèle répète les répliques justes.</p>
+<h4>2. Comment j’ai pensé</h4>
+<p>Je n’avais pas vingt-cinq vrais achats annotés.</p>
+<p>J’ai écrit des trajectoires synthétiques. Je assume : petit, répétitif, fautes d’accord.</p>
+<h4>3. Comment dans le code</h4>
+<p><code>teacher_trajectory</code> fabrique system, user, outils, puis <code>&lt;final&gt;</code>.</p>
+<p>Vingt-quatre cas : six catégories, quatre scénarios. Plus un hors vêtement. Total 25.</p>
+<p>Accessoire n’est pas dans l’entraînement.</p>
+<h4>4. Où je montre</h4>
+<p><code>purchase_llm_sft.jsonl</code> : 25 lignes. Ligne 2 = haut noir 59. Ligne 20 = « ces chaussures crée ».</p>
+<p><code>build_purchase_llm_dataset.py</code> 17–38.</p>
+<h4>5. Ce que je dis</h4>
+<p>Chaque ligne est un dialogue complet. Vingt-quatre fois le même schéma, six habits, quatre histoires. Noir 59, beige 89, blanc 75, rouge 95. Plus un cas « ce n’est pas un vêtement ». C’est synthétique. Il y a même « ces chaussures crée ». Je le montre, je ne le cache pas.</p>
+<h4>6. Si elle me questionne</h4>
+<p><em>Pourquoi 25 ?</em> Assez pour le format, trop peu pour un style riche.</p>
+<p><em>Piège : il a juste mémorisé ?</em> Risque oui. D’où dix cas d’éval hors de ces prix. Limite : les traces se ressemblent encore.</p>
+
+<h3>I. Hyperparamètres</h3>
+<table>
+<tr><th>Réglage</th><th>Où</th><th>C’est quoi</th><th>Pourquoi</th></tr>
+<tr><td>r = 16</td><td>finetune 43</td><td>Taille des petites matrices LoRA</td><td>Assez pour le format, pas trop de poids</td></tr>
+<tr><td>alpha = 32</td><td>43</td><td>Force LoRA (alpha/r = 2)</td><td>Classique, un peu fort</td></tr>
+<tr><td>dropout = 0.05</td><td>43</td><td>J’éteins 5 % des liens LoRA</td><td>Moins coller aux 25 exemples</td></tr>
+<tr><td>q/k/v/o_proj</td><td>44</td><td>J’adapte l’attention</td><td>Là où le modèle choisit le mot</td></tr>
+<tr><td>lr 2e-4</td><td>54</td><td>Vitesse des pas</td><td>LoRA supporte plus vite que du full</td></tr>
+<tr><td>batch 2 × accum 4 = 8</td><td>51–52</td><td>Même effet qu’un batch 8</td><td>Moins de mémoire</td></tr>
+<tr><td>époques = 10</td><td>53 ; notebook 143</td><td>Dix lectures des 25 lignes</td><td>Voir terme J</td></tr>
+<tr><td>logging_steps = 10</td><td>55</td><td>J’affiche la loss tous les 10 pas</td><td>Voir si ça descend</td></tr>
+<tr><td>fp16 = False</td><td>58</td><td>Calcul en float32</td><td>Plus stable sur 1.5B</td></tr>
+<tr><td>max_new_tokens = 256</td><td>purchase_llm 183</td><td>Au plus 256 mots nouveaux</td><td>160 coupait les balises</td></tr>
+<tr><td>do_sample = False</td><td>183</td><td>Greedy : mot le plus probable</td><td>Reproductible</td></tr>
+<tr><td>temperature = 0.2</td><td>183</td><td>Devrait adoucir le hasard</td><td><strong>Sans effet</strong> si greedy</td></tr>
+</table>
+<p><em>Piège :</em> j’ai mis temperature 0.2, mais <code>do_sample=False</code> l’annule. Je le dis avant le warning.</p>
+
+<h3>J. Époques</h3>
+<p>Une époque, c’est un tour complet des 25 dialogues.</p>
+<p>Le script et le notebook du projet disent <strong>10</strong>.</p>
+<p>L’entraînement réel : Colab, T4. Preuve = le fichier Colab téléchargé.</p>
+<div class="warn">
+<strong>Écart.</strong> Le <code>.ipynb</code> du repo a des sorties vides. La loss 6,10 → 0,63 n’est <strong>pas</strong> dans Git. Je ne l’invente pas. Je la montre seulement si j’ai l’export Colab.
+</div>
+
+<!-- ========== PARTIE 3 ========== -->
+<h2>Partie 3 — termes K à O</h2>
+
+<h3>K. Chargement du modèle</h3>
+<h4>1. Définition</h4>
+<p>Charger le modèle, c’est l’ouvrir en mémoire pour qu’il puisse écrire.</p>
+<p><code>lru_cache</code>, c’est : je le charge une fois, puis je le réutilise.</p>
+<h4>2. Comment j’ai pensé</h4>
+<p>Le problème : Qwen pèse des giga. Je ne dois pas le recharger à chaque phrase.</p>
+<p>J’ai choisi float32 CPU dans le code de prod. Pas de <code>cuda</code> dans ce pipeline.</p>
+<p>J’ai écarté de fusionner LoRA : je veux pouvoir l’éteindre.</p>
+<h4>3. Comment dans le code</h4>
+<p><code>_local_pipeline</code> est décoré <code>@lru_cache</code>.</p>
+<p>Il charge le tokenizer, Qwen en float32, puis l’adapter, puis <code>eval()</code>.</p>
+<p><code>eval</code> veut dire : plus d’apprentissage, seulement de l’écriture.</p>
+<h4>4. Où je montre</h4>
+<p><code>backend/app/ml/purchase_llm.py</code> 161–173, 176–184.</p>
+<p>À l’écran : <code>torch.float32</code>, <code>PeftModel.from_pretrained</code>, pas de <code>.to("cuda")</code>.</p>
+<h4>5. Ce que je dis</h4>
+<p>Je charge Qwen une seule fois, grâce au cache. Tokenizer, puis le gros modèle en float32. Puis je pose l’adapter LoRA. Puis j’appelle <code>eval</code> : on n’apprend plus. Sur ma machine, ça tourne CPU. C’est lent, mais le code de prod ne force pas le GPU.</p>
+<h4>6. Si elle me questionne</h4>
+<p><em>Pourquoi float32 ?</em> Plus simple, plus stable, et le script d’entraînement est aussi en fp16 False.</p>
+<p><em>Piège : ça utilise le GPU ?</em> Le chargeur local ne déplace pas le modèle sur CUDA. Limite : inférence CPU, lente.</p>
+
+<h3>L. Boucle agent et parseur</h3>
+<h4>1. Définition</h4>
+<p>La boucle, c’est : le modèle parle, j’exécute, je lui rends le résultat.</p>
+<p>Le parseur lit les balises et en tire un nom d’outil, ou un texte final.</p>
+<h4>2. Comment j’ai pensé</h4>
+<p>Sans parseur, le texte du modèle ne sert à rien.</p>
+<p>J’ai limité à six tours, pour éviter une boucle infinie.</p>
+<p>J’ai assoupli les balises fermantes : rustine, pas un beau design.</p>
+<h4>3. Comment dans le code</h4>
+<p><code>run_agent</code> génère, parse, appelle <code>sandbox.call</code>, renvoie <code>&lt;tool_result&gt;</code>.</p>
+<p>Au plus six fois. Puis <code>&lt;final&gt;</code>, ou rien.</p>
+<p>Les regex acceptent une balise sans fermeture.</p>
+<h4>4. Où je montre</h4>
+<p><code>purchase_llm.py</code> 28, 56–57, 60–82, 85–117.</p>
+<p>À l’écran : <code>(?:&lt;/tool_call&gt;)?</code> et <code>MAX_TOOL_STEPS = 6</code>.</p>
+<h4>5. Ce que je dis</h4>
+<p>Le modèle écrit une balise. Je la lis. Si c’est un outil, le sandbox l’exécute. Je lui rends le JSON. Il recommence, au plus six fois. Puis il doit écrire un final. J’accepte même une balise non fermée. Donc le 100 % de format est un peu aidé par le parseur. Je le dis moi-même.</p>
+<h4>6. Si elle me questionne</h4>
+<p><em>Pourquoi six ?</em> Cinq outils plus le final. Un cran de marge, pas une boucle libre.</p>
+<p><em>Piège : le 100 % est-il honnête ?</em> Le format est bon, mais le parseur est tolérant. C’est une limite.</p>
+
+<h3>M. Évaluation</h3>
+<h4>1. Définition</h4>
+<p>Évaluer, c’est noter le modèle sur des cas qu’il n’a pas appris par cœur.</p>
+<p>Trois notes : le format, le choix d’outils, la fidélité des chiffres.</p>
+<h4>2. Comment j’ai pensé</h4>
+<p>Les 25 trajectoires ne suffisent pas comme preuve.</p>
+<p>J’ai fait 10 cas différents : autres prix, autres couleurs, accessoire.</p>
+<p>Je compare LoRA et base en éteignant l’adapter, sans second modèle.</p>
+<h4>3. Comment dans le code</h4>
+<p>Format : balises valides, et un <code>&lt;final&gt;</code> à la fin.</p>
+<p>Outils : noms autorisés, et <code>inspect_wardrobe</code> en premier.</p>
+<p>Fidélité : les TND et la médiane doivent matcher les outils.</p>
+<h4>4. Où je montre</h4>
+<p><code>eval_purchase.py</code> 46–57 (cas), 148–174, 173–174, 219–240.</p>
+<p>Résultat LoRA lu dans le log : format 100 %, outils 100 %, fidélité 0 %.</p>
+<p>Les 10 traces sont la même suite de cinq outils.</p>
+<p>Tableau base : pas dans le dépôt. Je ne l’ai pas fini.</p>
+<h4>5. Ce que je dis</h4>
+<p>J’ai testé dix achats hors du fichier d’entraînement. Avec LoRA, le format et les outils sont bons. La fidélité est à zéro : les chiffres de l’explication ne collent pas assez. Les dix traces sont identiques. Je n’ai pas encore le tableau sans LoRA dans le repo. Je le dis avant qu’elle le demande.</p>
+<h4>6. Si elle me questionne</h4>
+<p><em>Pourquoi 0 % fidélité ?</em> Le modèle appelle bien les outils, mais il recopie mal les médianes.</p>
+<p><em>Piège : 100 % outils, c’est trop beau ?</em> Les dix cas ont la même trace. Ça ressemble à une habitude, pas à dix raisonnements.</p>
+
+<h3>N. MCP</h3>
+<h4>1. Définition</h4>
+<p>MCP, c’est un tuyau standard pour exposer des outils à un modèle.</p>
+<p>Comme une prise USB : le même format, plusieurs appareils.</p>
+<h4>2. Comment j’ai pensé</h4>
+<p>La prof a demandé comment le LLM parle aux tools, exemple MCP.</p>
+<p>J’ai wrappé le sandbox existant. Je n’ai pas réécrit la boucle ReAct.</p>
+<p>Version <code>mcp[cli]&lt;2</code> : l’API FastMCP v1. La v2 l’a cassée.</p>
+<h4>3. Comment dans le code</h4>
+<p>Qwen écrit <code>&lt;tool_call&gt;</code>. <code>parse_action</code> lit le nom.</p>
+<p>Le client MCP envoie. Le serveur FastMCP appelle <code>sandbox.call</code>.</p>
+<p>La boucle réelle de l’agent passe encore par le sandbox direct.</p>
+<p>MCP se voit avec <code>demo_mcp</code>, pas dans <code>run_agent</code>.</p>
+<h4>4. Où je montre</h4>
+<p><code>purchase_server.py</code> 17, 45–71, 1–4 · <code>purchase_client.py</code> · <code>demo_mcp.py</code> 32–79 · <code>docs/mcp.md</code> · <code>requirements.txt</code> 20.</p>
+<p>Démo : a) liste et schéma · b) cinq appels · c) parse_action puis outil inconnu.</p>
+<p class="small"><code>isError true</code> : à vérifier à l’écran. Le code imprime une exception ou un dump d’erreur. Je n’affirme pas le nom du champ sans l’avoir relancé.</p>
+<h4>5. Ce que je dis</h4>
+<p>MCP, c’est le standard pour brancher des outils. Qwen écrit une balise. Le parseur lit le nom. Le client envoie au serveur. Le serveur appelle le même sandbox. L’outil inconnu est refusé. Attention : la boucle de l’agent, aujourd’hui, n’passe pas encore par MCP. Je le démontre avec le script de démo. J’ai pinné mcp inférieur à 2.</p>
+<h4>6. Si elle me questionne</h4>
+<p><em>L’app utilise MCP en prod ?</em> Pas encore. <code>run_agent</code> appelle encore <code>sandbox.call</code>.</p>
+<p><em>Piège : alors c’est du vent ?</em> Non. C’est la même liste blanche, derrière un protocole. La limite, c’est que ce n’est pas branché dans la boucle.</p>
+
+<h3>O. Security</h3>
+<h4>1. Définition</h4>
+<p>Ici, sécurité veut dire : le modèle ne peut pas tout faire.</p>
+<p>Pas de code libre, pas de web, pas de clé affichée.</p>
+<h4>2. Comment j’ai pensé</h4>
+<p>E2B sert si le modèle exécute du code dans une machine jetable.</p>
+<p>Chez moi, il n’exécute pas de code. Il choisit un nom parmi cinq.</p>
+<p>Donc E2B ne m’apporte rien. La liste blanche suffit.</p>
+<h4>3. Comment dans le code</h4>
+<p>Liste blanche : <code>UnknownPurchaseTool</code>.</p>
+<p>Au plus six appels. Interrupteur <code>purchase_llm_enabled</code>.</p>
+<p>La clé API est masquée : <code>repr=False</code>.</p>
+<p>Timeouts : 8 secondes pour LLMAgent. 30 secondes pour l’API Purchase de secours. 20 secondes pour le chat.</p>
+<p>Il manque la validation des types d’arguments.</p>
+<h4>4. Où je montre</h4>
+<table>
+<tr><th>Quoi</th><th>Où</th><th>Valeur</th></tr>
+<tr><td>Liste blanche</td><td>purchase_tools.py 78–82</td><td>nom hors liste → erreur</td></tr>
+<tr><td>MAX_TOOL_STEPS</td><td>purchase_llm.py 28, 100</td><td>6</td></tr>
+<tr><td>purchase_llm_enabled</td><td>config.py 46 ; purchase_llm.py 88–89</td><td>true par défaut</td></tr>
+<tr><td>clé API masquée</td><td>config.py 39</td><td>repr=False</td></tr>
+<tr><td>timeout LLMAgent</td><td>config.py 51 ; llm_agent.py 273–274</td><td>8 s</td></tr>
+<tr><td>timeout chat</td><td>config.py 50</td><td>20 s</td></tr>
+<tr><td>timeout API Purchase</td><td>purchase_llm.py 198</td><td>30 s (secours HTTP)</td></tr>
+<tr><td>Qwen local</td><td>purchase_llm.py 176–184</td><td>pas de timeout HTTP</td></tr>
+</table>
+<h4>5. Ce que je dis</h4>
+<p>Le modèle n’a pas Python. Cinq noms, et c’est tout. Six tours maximum. Je peux couper le LLM Purchase avec un booléen. La clé API n’apparaît pas dans les logs. Huit secondes pour LLMAgent. Trente secondes seulement si Purchase passe par une API. En local, pas d’HTTP. E2B, je n’en ai pas besoin : je n’exécute pas de code libre. Ce qui manque : vérifier les types des arguments.</p>
+<h4>6. Si elle me questionne</h4>
+<p><em>Pourquoi pas E2B ?</em> E2B isole du code. Ici il n’y a pas de code à isoler.</p>
+<p><em>Piège : 8 s ou 30 s ?</em> Les deux. 8 s = LLMAgent. 30 s = secours Purchase HTTP. Le LoRA local n’a pas ce timeout.</p>
+
+<!-- FINALES -->
+<h2>Pitch de 3 minutes</h2>
+<p>DressMe aide à décider si un habit vaut le budget. Moi, j’ai l’agent d’achat.</p>
+<p>Un chef d’orchestre lance la vision, puis la garde-robe, puis mon agent.</p>
+<p>Le score est une formule. Quarante, vingt-cinq, vingt, quinze. Pas le LLM.</p>
+<p>La vision, ce n’est pas un LLM. FashionCLIP encode. SegFormer découpe.</p>
+<p>Pour le texte d’achat, j’ai pris Qwen un virgule cinq milliards. GPU T4 gratuit.</p>
+<p>Je lui ai écrit un brief : tu n’inventes rien, tu appelles cinq outils, tu respectes les balises.</p>
+<p>Pas d’exemples au runtime. Les exemples sont dans le fine-tuning.</p>
+<p>Cinq fiches d’outils, volontairement petites. Un seul argument : limit.</p>
+<p>Le prompt conseille. Le LoRA habitue. Le sandbox interdit. C’est déterministe.</p>
+<p>Ce n’est pas un RAG texte. C’est un kNN visuel sur le catalogue tunisien.</p>
+<p>Le vecteur n’entre jamais dans le prompt. Seulement le JSON des outils.</p>
+<p>J’ai fine-tuné avec LoRA. Adapter à part. Je peux comparer avec et sans.</p>
+<p>Vingt-cinq dialogues synthétiques. Six catégories, quatre scénarios, plus hors vêtement.</p>
+<p>C’est répétitif. Il y a « ces chaussures crée ». Je le assume.</p>
+<p>Réglages : r seize, alpha trente-deux, batch deux fois quatre, dix époques.</p>
+<p>Greedy à l’inférence. La température est dans le code, mais sans effet.</p>
+<p>La loss Colab n’est pas dans le notebook Git. Je le dis.</p>
+<p>Je charge Qwen une fois, float32, adapter par-dessus, mode eval.</p>
+<p>Boucle : balise, outil, résultat, au plus six fois, puis final.</p>
+<p>Le parseur accepte une balise non fermée. Le 100 % de format est un peu aidé.</p>
+<p>Dix cas hors SFT : format 100, outils 100, fidélité 0. Traces identiques.</p>
+<p>Pas encore de tableau base dans le repo.</p>
+<p>MCP : même sandbox, autre tuyau. Démo en trois étapes. Pas encore dans la boucle.</p>
+<p>Sécurité : liste blanche, six tours, clé masquée, timeouts 8 et 30. Pas E2B.</p>
+<p>Voilà ce que j’ai fait, et voilà ce qui reste faible.</p>
+
+<h2>Dialogue type</h2>
+<ol>
+<li><strong>Prof :</strong> Comment as-tu fait ?<br>
+<strong>Moi :</strong> Score en formule. LoRA pour les outils et le texte. Sandbox fermé.</li>
+<li><strong>Prof :</strong> Ok, montre-moi.<br>
+<strong>Moi :</strong> J’ouvre <code>purchase_agent.py</code> ligne 127, le score, puis 171, <code>run_agent</code>.</li>
+<li><strong>Prof :</strong> C’est quoi LoRA ?<br>
+<strong>Moi :</strong> De petites matrices collées sur Qwen. Je n’ai pas réécrit le gros modèle.</li>
+<li><strong>Prof :</strong> Montre les outils.<br>
+<strong>Moi :</strong> J’ouvre <code>purchase_tools.py</code> ligne 17, les cinq noms, puis 78, la liste blanche.</li>
+<li><strong>Prof :</strong> C’est quoi MCP ?<br>
+<strong>Moi :</strong> Un tuyau standard vers les mêmes outils. Démo dans <code>demo_mcp.py</code>. Pas encore dans la boucle.</li>
+<li><strong>Prof :</strong> Tes résultats ?<br>
+<strong>Moi :</strong> J’ouvre <code>eval_purchase.py</code> ligne 46. Dix cas. Format et outils 100. Fidélité 0. Je l’assume.</li>
+</ol>
+
+<h2>Les 8 limites à dire AVANT qu’elle les trouve</h2>
+<table>
+<tr><th>#</th><th>Limite</th><th>Je dis</th><th>Ensuite</th></tr>
+<tr><td>1</td><td>Fidélité 0 %</td><td>Les outils marchent. Les chiffres de l’explication, pas encore.</td><td>Forcer la médiane dans le <code>&lt;final&gt;</code>, ou plus d’exemples chiffrés.</td></tr>
+<tr><td>2</td><td>Parseur tolérant</td><td>Le 100 % de format est un peu aidé par le parseur.</td><td>Revenir à des balises strictes après un meilleur LoRA.</td></tr>
+<tr><td>3</td><td>25 exemples synthétiques</td><td>C’est un script, pas 25 vrais achats.</td><td>Annoter de vrais cas, et casser les copies-collées.</td></tr>
+<tr><td>4</td><td>loss sur toute la séquence</td><td><code>labels = input_ids</code> : le modèle apprend aussi le padding.</td><td>Masquer tout sauf la réponse assistant.</td></tr>
+<tr><td>5</td><td>Température ignorée</td><td>0.2 est dans le code. Greedy l’annule.</td><td>Enlever temperature, ou activer do_sample pour de vrai.</td></tr>
+<tr><td>6</td><td>Pas de tableau base</td><td>Je n’ai pas le comparatif sans LoRA dans le repo.</td><td>Relancer <code>--mode base</code> et coller le tableau.</td></tr>
+<tr><td>7</td><td>Schémas sans types</td><td>TOOL_SPECS = nom + phrase. MCP n’ajoute que limit.</td><td>Déclarer les types de tous les arguments.</td></tr>
+<tr><td>8</td><td>MCP hors boucle</td><td>La démo marche. <code>run_agent</code> appelle encore le sandbox direct.</td><td>Remplacer <code>sandbox.call</code> par le client MCP, sans changer le ReAct.</td></tr>
+</table>
+
+<h2>Ordre d’ouverture des fichiers</h2>
+<ol>
+<li><code>backend/app/agents/orchestrator.py</code> — 37–50, 220–254</li>
+<li><code>backend/app/agents/purchase_agent.py</code> — 22, 127–178</li>
+<li><code>backend/app/ml/purchase_llm.py</code> — 27, 30–46, 56–57, 85–117, 161–184</li>
+<li><code>backend/app/services/purchase_tools.py</code> — 17–38, 78–82</li>
+<li><code>backend/app/data/purchase_llm_sft.jsonl</code> — lignes 2 et 20</li>
+<li><code>backend/scripts/finetune_purchase_llm.py</code> — 42–61</li>
+<li><code>backend/scripts/eval_purchase.py</code> — 46–57, 148–174, 219–240</li>
+<li><code>backend/app/mcp/purchase_server.py</code> — 17, 45–71</li>
+<li><code>backend/scripts/demo_mcp.py</code> — 32–79</li>
+<li><code>backend/app/services/catalog_index.py</code> — 23, 80–88</li>
+<li><code>backend/app/core/config.py</code> — 39–51</li>
+<li><code>ml/notebooks/14_purchase_llm_lora.py</code> — 143 (10 époques ; pas de loss dans Git)</li>
+</ol>
+
+<h2>Mini-glossaire (25 termes)</h2>
+<table>
+<tr><td>LLM</td><td>Modèle qui prédit le mot suivant.</td></tr>
+<tr><td>Token</td><td>Un morceau de mot que le modèle lit ou écrit.</td></tr>
+<tr><td>Agent</td><td>Programme qui agit pour un but, pas seulement qui classe.</td></tr>
+<tr><td>ReAct</td><td>Agir, voir le résultat, puis agir encore.</td></tr>
+<tr><td>LoRA</td><td>Petites matrices ajoutées, le gros modèle reste gelé.</td></tr>
+<tr><td>Adapter</td><td>Le fichier de ces petites matrices, à part.</td></tr>
+<tr><td>Rang (r)</td><td>Taille de ces petites matrices. Chez moi, 16.</td></tr>
+<tr><td>Alpha</td><td>Force de LoRA. Chez moi 32, donc alpha/r = 2.</td></tr>
+<tr><td>Dropout</td><td>J’éteins au hasard 5 % des liens pendant l’apprentissage.</td></tr>
+<tr><td>Epoch</td><td>Un passage complet sur les 25 dialogues.</td></tr>
+<tr><td>Batch</td><td>Combien d’exemples je vois avant de corriger les poids.</td></tr>
+<tr><td>Learning rate</td><td>Taille du pas de correction. Chez moi 2e-4.</td></tr>
+<tr><td>Loss</td><td>L’erreur : plus elle baisse, plus le modèle imite le script.</td></tr>
+<tr><td>SFT</td><td>Je montre le dialogue idéal, le modèle imite.</td></tr>
+<tr><td>Greedy</td><td>Je prends toujours le mot le plus probable.</td></tr>
+<tr><td>Température</td><td>Dose de hasard. Ici sans effet, car greedy.</td></tr>
+<tr><td>Embedding</td><td>Une liste de nombres qui représente une image ou un mot.</td></tr>
+<tr><td>kNN</td><td>Je prends les plus proches voisins dans cet espace.</td></tr>
+<tr><td>RAG</td><td>Chercher une info, puis la donner au modèle.</td></tr>
+<tr><td>Sandbox</td><td>Bac à sable : le modèle n’a ni Python ni web.</td></tr>
+<tr><td>Liste blanche</td><td>Seuls ces cinq noms passent.</td></tr>
+<tr><td>MCP</td><td>Tuyuau standard pour exposer des outils.</td></tr>
+<tr><td>Tool schema</td><td>La fiche d’un outil : nom, phrase, parfois un argument.</td></tr>
+<tr><td>Parseur</td><td>Il lit les balises et en tire un nom ou un texte.</td></tr>
+<tr><td>Hallucination</td><td>Le modèle invente un prix ou une marque.</td></tr>
+</table>
+
+<h2>À vérifier et écarts</h2>
+<ul>
+<li>Schéma JSON MCP de <code>limit</code> : à vérifier en lançant <code>demo_mcp</code>.</li>
+<li>Champ <code>isError</code> : à vérifier à l’écran. Le code imprime exception ou dump.</li>
+<li>Loss 6,10 → 0,63 : <strong>absente</strong> du notebook Git (sorties vides). Seulement Colab perso.</li>
+<li>Tableau <code>--mode base</code> : <strong>absent</strong> du dépôt.</li>
+<li>Timeouts : 8 s = LLMAgent ; 20 s = chat ; 30 s = API Purchase de secours ; local LoRA = pas ce timeout.</li>
+<li><code>run_agent</code> = sandbox direct, pas MCP. C’est écrit dans <code>purchase_server.py</code> 1–4.</li>
+<li><code>labels = input_ids</code> : <code>finetune_purchase_llm.py</code> 37. Loss sur toute la séquence.</li>
+<li>Température 0.2 + <code>do_sample=False</code> : warning Transformers, température ignorée.</li>
+</ul>
+
+</body>
+</html>

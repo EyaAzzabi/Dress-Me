@@ -3,12 +3,10 @@
 #
 # **À lancer sur Google Colab avec GPU T4** (Runtime → Change runtime type → GPU).
 #
-# ## Idée
-# - Modèle de base : `Qwen/Qwen2.5-1.5B-Instruct` (français, 1,5B paramètres).
-# - On **ne réentraîne pas** les 1,5 milliard de poids.
-# - **LoRA** : on apprend de petites matrices (`r=16`) sur l’attention.
-# - Le modèle apprend à **appeler des tools** dans un sandbox, puis à rédiger
-#   un conseil d’achat **uniquement** à partir des résultats.
+# Ce notebook **reproduit** `backend/scripts/finetune_purchase_llm.py` :
+# - dataset officiel : `backend/app/data/purchase_llm_sft.jsonl` (**25** trajectoires)
+# - 5 outils du sandbox (noms du code, pas les noms courts du schéma)
+# - mêmes hyperparamètres LoRA que le script
 #
 # FashionCLIP / SegFormer restent la vision. Le LLM ne voit jamais l’image.
 
@@ -25,99 +23,71 @@ print("GPU :", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "
 # %pip install -q peft datasets accelerate transformers
 
 # %% [markdown]
-# ## 1. Sandbox : les seuls tools autorisés
+# ## 1. Sandbox : les 5 tools du code (`purchase_tools.py`)
 #
-# Le LLM n’a ni Python, ni internet. Il ne peut émettre que ces noms.
+# Le LLM n’a ni Python, ni internet. Noms **exactement** comme dans le backend.
 
 # %%
 TOOLS = [
-    "inspect_wardrobe",          # doublons, tenues, style (garde-robe)
-    "search_tunisian_catalog",   # voisins visuels FashionCLIP
-    "compare_market_price",      # percentile du prix tunisien
-    "rank_tunisian_brands",      # marques proches
-    "estimate_cost_per_wear",    # coût par port
+    "inspect_wardrobe",
+    "search_tunisian_catalog",
+    "compare_market_price",
+    "rank_tunisian_brands",
+    "estimate_cost_per_wear",
 ]
-
-SYSTEM = f"""Tu es l'agent d'achat DressMe. Tu n'inventes ni prix, ni score, ni marque.
-Tu appelles d'abord un outil du sandbox, un seul à la fois.
-
-Outils : {", ".join(TOOLS)}
-
-Format :
-<tool_call>{{"name": "inspect_wardrobe"}}</tool_call>
-
-Quand tu as assez de faits :
-<final>{{"explanation": "2 à 4 phrases, tutoiement."}}</final>
-"""
-
-print(SYSTEM)
+print("Outils autorisés :", TOOLS)
 
 # %% [markdown]
-# ## 2. Dataset : trajectoires d’outils (pas des phrases isolées)
+# ## 2. Dataset officiel : 25 trajectoires (`purchase_llm_sft.jsonl`)
 #
-# Chaque exemple = dialogue complet : appels de tools → résultats → explication.
+# Chaque ligne = un dialogue complet : `<tool_call>` → `<tool_result>` → `<final>`.
+# Sur Colab : clone le repo Dress-Me, ou uploade ce fichier JSONL.
 
 # %%
 BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 ADAPTER_DIR = Path("/content/purchase_llm") if Path("/content").exists() else Path("purchase_llm_adapter")
 
 
-def example(task: dict, tools: dict, explanation: str) -> dict:
-    messages = [
-        {"role": "system", "content": SYSTEM},
-        {"role": "user", "content": "Analyse cet achat.\n" + json.dumps(task, ensure_ascii=False)},
+def find_dataset() -> Path:
+    candidates = [
+        Path("backend/app/data/purchase_llm_sft.jsonl"),
+        Path("../backend/app/data/purchase_llm_sft.jsonl"),
+        Path("../../backend/app/data/purchase_llm_sft.jsonl"),
+        Path("/content/Dress-Me/backend/app/data/purchase_llm_sft.jsonl"),
+        Path("/content/purchase_llm_sft.jsonl"),
+        Path("purchase_llm_sft.jsonl"),
     ]
-    for name, result in tools.items():
-        messages.append({"role": "assistant", "content": f'<tool_call>{{"name": "{name}"}}</tool_call>'})
-        messages.append({"role": "user", "content": "<tool_result>" + json.dumps(result, ensure_ascii=False) + "</tool_result>"})
-    messages.append({
-        "role": "assistant",
-        "content": "<final>" + json.dumps({"explanation": explanation}, ensure_ascii=False) + "</final>",
-    })
-    return {"messages": messages}
+    try:
+        candidates.insert(0, Path(__file__).resolve().parents[2] / "backend" / "app" / "data" / "purchase_llm_sft.jsonl")
+    except NameError:
+        pass
+    for path in candidates:
+        if path.exists():
+            return path
+    raise FileNotFoundError(
+        "Fichier introuvable : backend/app/data/purchase_llm_sft.jsonl. "
+        "Clone Dress-Me ou uploade le JSONL dans /content/."
+    )
 
 
-rows = [
-    example(
-        {"category": "haut", "price": 59, "wardrobe_size": 0},
-        {
-            "inspect_wardrobe": {"wardrobe_size": 0, "duplicates": [], "outfits_unlocked": 0},
-            "search_tunisian_catalog": [{"name": "Tee", "brand": "Kontakt", "price": 49}],
-            "compare_market_price": {"price": 59, "market_median": 70, "label": "bon_prix"},
-            "rank_tunisian_brands": [{"name": "Kontakt", "affinity": 0.71}],
-        },
-        "Ta garde-robe est encore vide, rien ne s'oppose à ce haut. "
-        "À 59 TND tu es sous la médiane du marché tunisien (70 TND).",
-    ),
-    example(
-        {"category": "bas", "price": 89, "wardrobe_size": 8},
-        {
-            "inspect_wardrobe": {"wardrobe_size": 8, "duplicates": [{"similarity": 0.96}], "outfits_unlocked": 2},
-            "search_tunisian_catalog": [{"name": "Jean", "brand": "Barsha", "price": 65}],
-            "compare_market_price": {"price": 89, "market_median": 70, "label": "cher"},
-            "rank_tunisian_brands": [{"name": "Barsha", "affinity": 0.68}],
-        },
-        "Tu as déjà une pièce presque identique : garde ton budget. "
-        "89 TND dépasse la médiane (70 TND) — Barsha a un modèle à 65 TND.",
-    ),
-    example(
-        {"category": "robe", "price": 75, "wardrobe_size": 12},
-        {
-            "inspect_wardrobe": {"wardrobe_size": 12, "duplicates": [], "outfits_unlocked": 5},
-            "search_tunisian_catalog": [{"name": "Linen", "brand": "Chedly Sisters", "price": 79}],
-            "compare_market_price": {"price": 75, "market_median": 80, "label": "prix_marche"},
-            "rank_tunisian_brands": [{"name": "Chedly Sisters", "affinity": 0.73}],
-        },
-        "Bon achat : cette robe crée 5 tenues avec ce que tu as déjà. "
-        "Le prix (75 TND) est dans la norme du marché (médiane 80 TND).",
-    ),
-]
+DATASET = find_dataset()
+rows = [json.loads(line) for line in DATASET.read_text(encoding="utf-8").splitlines() if line]
+assert len(rows) == 25, f"Attendu 25 trajectoires, trouvé {len(rows)} dans {DATASET}"
 
-print(len(rows), "exemples — un message assistant ressemble à :")
-print(rows[0]["messages"][2]["content"])
+tool_names_in_data = set()
+for row in rows:
+    for msg in row["messages"]:
+        if msg["role"] == "assistant" and "<tool_call>" in msg["content"]:
+            body = json.loads(msg["content"].split("<tool_call>")[1].split("</tool_call>")[0])
+            tool_names_in_data.add(body["name"])
+
+print(f"{len(rows)} trajectoires chargées depuis {DATASET}")
+print("Outils présents dans le dataset :", sorted(tool_names_in_data))
+assert tool_names_in_data == set(TOOLS), tool_names_in_data
+print("Exemple de tool_call :", rows[1]["messages"][2]["content"])
 
 # %% [markdown]
-# ## 3. Tokenisation
+# ## 3. Tokenisation (identique au script : max_length=1536)
 
 # %%
 from datasets import Dataset
@@ -130,7 +100,7 @@ if tokenizer.pad_token is None:
 
 def tokenize(example):
     text = tokenizer.apply_chat_template(example["messages"], tokenize=False)
-    tokens = tokenizer(text, truncation=True, max_length=1024, padding="max_length")
+    tokens = tokenizer(text, truncation=True, max_length=1536, padding="max_length")
     tokens["labels"] = tokens["input_ids"].copy()
     return tokens
 
@@ -139,18 +109,14 @@ dataset = Dataset.from_list(rows).map(tokenize, remove_columns=["messages"])
 print(dataset)
 
 # %% [markdown]
-# ## 4. LoRA : on gèle Qwen, on apprend ~quelques millions de paramètres
+# ## 4. LoRA — mêmes réglages que `finetune_purchase_llm.py`
 #
-# `r=16` = rang des matrices LoRA (petit = léger, suffisant pour adapter le style + les tools).
+# r=16, lora_alpha=32, dropout=0.05, modules q/k/v/o_proj.
 
 # %%
 from peft import LoraConfig, TaskType, get_peft_model
 
-model = AutoModelForCausalLM.from_pretrained(
-    BASE_MODEL,
-    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-    device_map="auto",
-)
+model = AutoModelForCausalLM.from_pretrained(BASE_MODEL)
 model = get_peft_model(model, LoraConfig(
     task_type=TaskType.CAUSAL_LM,
     r=16,
@@ -161,7 +127,7 @@ model = get_peft_model(model, LoraConfig(
 model.print_trainable_parameters()
 
 # %% [markdown]
-# ## 5. Entraînement (environ 10–20 min sur T4)
+# ## 5. Entraînement (identique au script)
 
 # %%
 from transformers import Trainer, TrainingArguments
@@ -172,14 +138,14 @@ trainer = Trainer(
     model=model,
     args=TrainingArguments(
         output_dir=str(ADAPTER_DIR / "runs"),
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=8,
-        num_train_epochs=3,
+        per_device_train_batch_size=2,
+        gradient_accumulation_steps=4,
+        num_train_epochs=10,
         learning_rate=2e-4,
-        logging_steps=1,
+        logging_steps=10,
         save_strategy="no",
         report_to=[],
-        fp16=torch.cuda.is_available(),
+        fp16=False,
     ),
     train_dataset=dataset,
 )
@@ -191,11 +157,12 @@ print("Adapter enregistré dans", ADAPTER_DIR)
 # %% [markdown]
 # ## 6. Après Colab
 #
-# Télécharge le dossier `purchase_llm` (fichiers `adapter_config.json` + poids LoRA)
-# et copie-le ici sur ton PC :
+# Télécharge le dossier `purchase_llm` (`adapter_config.json` + poids LoRA)
+# et copie-le ici :
 #
 # `Dress-Me/backend/app/ml/artifacts/purchase_llm/`
 #
-# Relance le backend. L’agent Purchase chargera ce LoRA et appellera les tools du sandbox.
+# Relance le backend. L’agent Purchase chargera ce LoRA.
 #
-# Code runtime : `backend/app/ml/purchase_llm.py` et `backend/app/services/purchase_tools.py`.
+# Code runtime (ne pas modifier pour la démo) :
+# `backend/app/ml/purchase_llm.py` et `backend/app/services/purchase_tools.py`.
