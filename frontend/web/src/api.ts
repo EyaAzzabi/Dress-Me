@@ -4,7 +4,7 @@ const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api/v1";
 
 export const api = axios.create({ baseURL: API_URL });
 
-/** What POST /wardrobe/ answers (422) when the model isn't sure of a photo's category — often a photo of several pieces. */
+/** What POST /wardrobe/ answers (422) when the model isn't sure of a photo's category Ã¢â‚¬â€ often a photo of several pieces. */
 export interface LowCategoryConfidence {
   message: string;
   suggested_category: string;
@@ -23,15 +23,15 @@ export function getApiError(error: unknown): string {
     if (typeof detail === "string") return detail;
     if (detail && typeof detail.message === "string") return detail.message;
     if (error.response?.status === 0 || !error.response) {
-      return "Impossible de joindre le serveur. Vérifie que l’API DressMe est démarrée.";
+      return "Impossible de joindre le serveur. VÃƒÂ©rifie que lÃ¢â‚¬â„¢API DressMe est dÃƒÂ©marrÃƒÂ©e.";
     }
   }
-  return error instanceof Error ? error.message : "Une erreur est survenue. Réessaie.";
+  return error instanceof Error ? error.message : "Une erreur est survenue. RÃƒÂ©essaie.";
 }
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("dressme_access_token");
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (token) config.headers.Authorization = "Bearer " + token;
   return config;
 });
 
@@ -46,6 +46,9 @@ export interface ClothingItem {
   pattern?: string | null;
   attribute_confidence?: Record<string, number> | null;
   created_at: string;
+  price?: number | null;
+  quantity?: number;
+  sizes?: Record<string, number> | null;
 }
 
 export interface Outfit {
@@ -90,18 +93,100 @@ export interface PackingList {
   items: ClothingItem[];
 }
 
+export interface CatalogAlternative {
+  item_key?: string | null;
+  name: string;
+  price: string | number | null;
+  brand: string | null;
+  category: string | null;
+  image_url: string | null;
+  similarity?: number | null;
+  cheaper?: boolean | null;
+  product_url?: string | null;
+  store_url?: string | null;
+  buyable?: boolean;
+}
+
+export interface BrandRecommendation {
+  name: string;
+  website: string | null;
+  affinity: number;
+  product_count: number;
+  price_min: number | null;
+  price_max: number | null;
+  showcase: CatalogAlternative[];
+}
+
 export interface PurchaseResult {
   verdict: "recommended" | "think_twice" | "not_recommended";
+  score?: number;
   compatibility_score: number;
   similar_item_ids: string[];
-  catalog_alternatives: {
-    name: string;
-    price: string | number | null;
-    brand: string | null;
-    category: string | null;
-    image_url: string | null;
-  }[];
+  catalog_alternatives: CatalogAlternative[];
+  tunisian_brands?: BrandRecommendation[];
   explanation: string;
+}
+
+export interface PurchaseHistoryItem {
+  id: string;
+  image_url: string;
+  category: string;
+  color: string | null;
+  price: number | null;
+  verdict: PurchaseResult["verdict"];
+  score: number;
+  result: PurchaseResult;
+  created_at: string;
+}
+
+export interface WishlistEntry {
+  item_key: string;
+  name: string;
+  brand: string | null;
+  category: string | null;
+  image_url: string | null;
+  saved_price: number | null;
+  live_price: number | null;
+  available: boolean | null;
+  price_drop: number | null;
+  product_url: string | null;
+  store_url: string | null;
+  buyable: boolean;
+  created_at: string;
+}
+
+export function formatTnd(value: string | number | null | undefined): string | null {
+  if (value == null) return null;
+  const amount = typeof value === "number" ? value : parseFloat(String(value).replace(",", "."));
+  if (!Number.isFinite(amount)) return String(value);
+  return `${amount.toFixed(amount % 1 === 0 ? 0 : 2).replace(".", ",")} TND`;
+}
+
+export async function getPurchaseHistory() {
+  const { data } = await api.get<PurchaseHistoryItem[]>("/purchase/history");
+  return data;
+}
+
+export async function deleteHistoryEntry(id: string) {
+  await api.delete(`/purchase/history/${id}`);
+}
+
+export async function clearPurchaseHistory() {
+  await api.delete("/purchase/history");
+}
+
+export async function getWishlist() {
+  const { data } = await api.get<WishlistEntry[]>("/purchase/wishlist");
+  return data;
+}
+
+export async function addToWishlist(itemKey: string) {
+  const { data } = await api.post<WishlistEntry>("/purchase/wishlist", { item_key: itemKey });
+  return data;
+}
+
+export async function removeFromWishlist(itemKey: string) {
+  await api.delete(`/purchase/wishlist/${encodeURIComponent(itemKey)}`);
 }
 
 export interface CurrentUser {
@@ -109,6 +194,65 @@ export interface CurrentUser {
   email: string;
   full_name: string | null;
   avatar_photo_url: string | null;
+  role: "customer" | "stylist";
+}
+
+export interface StylistClient {
+  id: string;
+  full_name: string | null;
+  email: string;
+}
+
+export interface StylistRecommendation {
+  id: string;
+  customer_id: string;
+  item_ids: string[];
+  message: string | null;
+  created_at: string;
+}
+
+export interface CustomerRecommendation {
+  id: string;
+  stylist_id: string;
+  stylist_name: string | null;
+  items: ClothingItem[];
+  message: string | null;
+  created_at: string;
+}
+
+export interface BoutiqueCatalog {
+  stylist_id: string;
+  stylist_name: string;
+  items: ClothingItem[];
+}
+
+export interface BoutiqueOrderCreate {
+  item_id: string;
+  quantity: number;
+  size: string | null;
+  customer_phone: string;
+  delivery_address: string;
+  note: string;
+}
+
+export interface BoutiqueOrder {
+  id: string;
+  stylist_id: string;
+  customer_id: string;
+  customer_name: string | null;
+  customer_email: string | null;
+  item_id: string;
+  item_category: string | null;
+  item_image_url: string | null;
+  item_colors: string[] | null;
+  item_price: number | null;
+  quantity: number;
+  size: string | null;
+  customer_phone: string | null;
+  delivery_address: string | null;
+  note: string | null;
+  status: string;
+  created_at: string;
 }
 
 export async function uploadPhoto(file: File): Promise<string> {
@@ -184,4 +328,3 @@ export async function analyzePhoto(imageUrl: string): Promise<WardrobeAnalysisRe
   const { data } = await api.post<WardrobeAnalysisResponse>("/wardrobe/analyze", { image_url: imageUrl });
   return data;
 }
-
