@@ -1,0 +1,119 @@
+from functools import lru_cache
+
+from pydantic import Field
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    app_name: str = "DressMe API"
+    api_v1_prefix: str = "/api/v1"
+    # Comma-separated. Defaults cover local dev (Vite web, Expo web/Metro) — the
+    # mobile app itself authenticates via a Bearer header, not cookies, so it isn't
+    # subject to browser CORS at all; this only matters for browser-based clients.
+    cors_origins: str = "http://localhost:5173,http://localhost:8081,http://localhost:8082,http://localhost:19006"
+
+    secret_key: str = "change-me"
+    algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60 * 24
+
+    database_url: str = "postgresql+psycopg://dressme:dressme@localhost:5432/dressme"
+    pinecone_api_key: str | None = None
+    pinecone_index_name: str = "dressme-clothing-embeddings"
+
+    storage_bucket: str = "dressme-wardrobe"
+    aws_region: str = "us-east-1"
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    # Override for S3-compatible non-AWS storage (MinIO, DigitalOcean Spaces, ...).
+    # Leave unset for real AWS S3. See app/services/storage.py.
+    storage_endpoint_url: str | None = None
+    # Explicit opt-in local-disk fallback for dev/testing without any cloud account —
+    # a directory the backend process can write to; served back via StaticFiles at
+    # /media (see app/main.py). Deliberately separate from "unconfigured" (leaving
+    # everything above unset still raises, per app/services/storage.py's docstring) —
+    # this only activates when someone sets it on purpose.
+    local_storage_dir: str | None = None
+    public_base_url: str = "http://localhost:8000"
+
+    openweather_api_key: str | None = None
+    llm_api_key: str | None = Field(default=None, repr=False)
+    openai_api_key: str | None = Field(default=None, repr=False)
+    groq_api_key: str | None = Field(default=None, repr=False)
+    llm_provider: str = "none"  # none | groq | gemini | ollama | openai | mistral | llama
+    # Optional provider overrides; llama requires both URL and model.
+    llm_base_url: str | None = None
+    llm_model: str | None = None
+    # Purchase-only: LoRA-adapted Qwen2.5 tool-calling agent (or the same prompt via
+    # LLM_PROVIDER). Scores and sandbox tools stay deterministic either way.
+    purchase_llm_enabled: bool = True
+    # Optional stronger model for conversation only; saved narratives keep llm_model.
+    llm_chat_model: str | None = None
+    llm_chat_fallback_model: str | None = None
+    llm_chat_timeout_seconds: float = Field(default=20.0, gt=0, le=60)
+    llm_timeout_seconds: float = Field(default=8.0, gt=0, le=60)
+    llm_max_retries: int = Field(default=1, ge=0, le=2)
+    llm_backoff_seconds: float = Field(default=0.25, ge=0, le=5)
+    llm_max_backoff_seconds: float = Field(default=2.0, ge=0, le=10)
+    llm_cache_ttl_seconds: float = Field(default=3600, ge=0, le=86400)
+    llm_failure_ttl_seconds: float = Field(default=15, ge=0, le=300)
+    llm_cache_max_entries: int = Field(default=512, ge=1, le=10000)
+
+    # MCP (Model Context Protocol) integration for RecommendationAgent tools.
+    # Disabled by default; set to True and configure mcp_server_urls to enable.
+    mcp_enabled: bool = False
+    mcp_server_urls: str = "{}"  # JSON string: {"get_weather": "http://...", ...}
+
+    # RecommendationAgent enrichment kill-switches (3 axes: fine-tuning ranking,
+    # contextual RAG, prompt engineering + LLM). Default ON so the enriched path is
+    # used when artifacts/data are present; flip to false to force the exact legacy
+    # heuristic (ranking) or skip RAG retrieval (contextual_rag) without redeploying.
+    # The test conftest forces both off so existing tests run the fallback path.
+    ranking_enabled: bool = True
+    contextual_rag_enabled: bool = True
+
+    @property
+    def active_llm_api_key(self) -> str | None:
+        """Use a provider-specific key when available, with the shared key as fallback."""
+        if self.llm_provider == "openai" and self.openai_api_key:
+            return self.openai_api_key
+        if self.llm_provider == "groq" and self.groq_api_key:
+            return self.groq_api_key
+        return self.llm_api_key
+
+    # Virtual try-on (TryOnAgent) via Replicate's hosted API — no local GPU needed.
+    # replicate_tryon_model_version has no safe hardcoded default: Replicate model
+    # version ids change over time and can't be verified without an account, so it's
+    # left for whoever sets up the account to copy from the model's Replicate page
+    # (e.g. search "idm-vton" or "ootdiffusion" on replicate.com) rather than guessed.
+    replicate_api_token: str | None = None
+    replicate_tryon_model_version: str | None = None
+    # Whether to send a `category` (upper_body | lower_body | dresses) input to the model —
+    # IDM-VTON-style models accept it and need it to dress the legs or a dress correctly;
+    # other models may reject unknown inputs, so it's opt-in. Full-outfit renders (calendar)
+    # only look right with it on.
+    replicate_tryon_send_category: bool = False
+
+    # Free alternative to Replicate: a public Hugging Face Space (default: OOTDiffusion,
+    # which dresses upper body, lower body and dresses). No billing — it runs on shared
+    # ZeroGPU, so it can queue, and anonymous use has a small daily GPU quota; a free
+    # Hugging Face account token (HF_TOKEN) raises that quota. Public Spaces can also be
+    # paused or removed by their owners — change hf_tryon_space if that happens.
+    # tryon_provider: auto (Replicate when its credentials are set, else Hugging Face) |
+    # replicate | huggingface.
+    tryon_provider: str = "auto"
+    hf_tryon_space: str = "levihsu/OOTDiffusion"
+    hf_token: str | None = None
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+
+    @property
+    def mcp_server_urls_dict(self) -> dict[str, str]:
+        import json
+        return json.loads(self.mcp_server_urls or "{}")
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

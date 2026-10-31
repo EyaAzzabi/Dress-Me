@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "DressMe",
+    "slug": "dressme-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "scheme": "dressme",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dressme.mobile"
+    },
+    "android": {
+      "package": "com.dressme.mobile"
+    },
+    "extra": {
+      "apiUrl": "http://192.168.1.27:8000/api/v1"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "DressMe utilise la caméra pour photographier les vêtements à ajouter au dressing.",
+          "photosPermission": "DressMe accède aux photos pour ajouter un vêtement depuis la galerie."
+        }
+      ],
+      "expo-font",
+      "expo-status-bar"
+    ]
+  }
+}

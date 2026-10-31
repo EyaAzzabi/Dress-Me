@@ -1,0 +1,33 @@
+{
+  "project_type": "FastAPI + SQLAlchemy + PostgreSQL backend, React Native (Expo) mobile frontend",
+  "language": "Python 3.12 (backend), TypeScript (frontend)",
+  "build_system": "pip + requirements.txt (backend), Expo / Metro bundler (frontend). No Makefile. Backend started with uvicorn.",
+  "test_framework": "pytest (backend, in backend/). No frontend test runner configured.",
+  "build_command": "cd backend && python -m pytest --tb=short -q  (or: python -c 'from app.agents.X import Y; print(\"OK\")' for smoke tests)",
+  "test_command": "cd backend && python -m pytest --tb=short -q",
+  "verification_instructions": "1. Smoke-import each new Python module: python -c 'from app.agents.X import Y; print(\"OK\")'. 2. Run pytest from backend/. 3. For frontend: cd frontend/mobile && npx tsc --noEmit.",
+  "snapshot_or_generated_files": null,
+  "environment_constraints": "Windows host (PowerShell). No signal.alarm available (use threading.Timer for timeouts). Do NOT modify orchestrator.py, llm_agent.py, context_agent.py. Do NOT push. langgraph must be added to backend/requirements.txt before the agent is written.",
+  "contribution_requirements": "Orchestrator contract must be preserved exactly: run() accepts same kwargs, returns {outfits: [{item_ids, relevance_score, explanation, ...}]}. Outfit DB model is NOT modified. feedback_alignment_at_k in recommendation_evaluation.py must remain importable.",
+  "key_patterns": "Agents extend BaseAgent (app/agents/base.py) with name:str and run(**kwargs)->dict. LLMAgent._chat(messages, json_mode, timeout) is the LLM call primitive — wrap in try/except for fallback. WeatherService.get_current_weather(city) has its own fallback (_get_fallback_weather). vector_store.py uses Pinecone + local JSON fallback. sklearn is already in requirements (use TfidfVectorizer for RAG). Tool return shape: {tool_name:str, result:Any, reasoning:str, error:str|None}. State is TypedDict passed through LangGraph nodes. Conditional edges via add_conditional_edges().",
+  "relevant_files": [
+    "backend/app/agents/base.py",
+    "backend/app/agents/recommendation_agent.py",
+    "backend/app/agents/recommendation_tools.py",
+    "backend/app/agents/recommendation_evaluation.py",
+    "backend/app/agents/orchestrator.py",
+    "backend/app/agents/llm_agent.py",
+    "backend/app/db/vector_store.py",
+    "backend/app/services/weather.py",
+    "backend/app/services/occasions.py",
+    "backend/app/models/clothing_item.py",
+    "backend/app/models/outfit.py",
+    "backend/app/models/recommendation_feedback.py",
+    "backend/app/schemas/outfit.py",
+    "backend/app/core/config.py",
+    "backend/requirements.txt",
+    "frontend/mobile/src/api/recommendations.ts",
+    "frontend/mobile/src/screens/OutfitRecommendationsScreen.tsx"
+  ],
+  "directory_structure": "backend/app/agents/ — all agent classes. backend/app/services/ — WeatherService, occasions, seasons helpers. backend/app/models/ — SQLAlchemy ORM models. backend/app/schemas/ — Pydantic schemas for routes. backend/app/db/ — vector_store.py (Pinecone+JSON), session.py. backend/app/rag/ — context_retrieval.py (existing historical RAG). backend/app/ml/ — compatibility_model, ranking_model. frontend/mobile/src/api/ — typed API clients. frontend/mobile/src/screens/ — React Native screens."
+}

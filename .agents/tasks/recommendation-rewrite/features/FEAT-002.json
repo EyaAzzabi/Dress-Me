@@ -1,0 +1,25 @@
+{
+    "id": "FEAT-002",
+    "type": "feat",
+    "description": "Frontend extension: extend TypeScript types in recommendations.ts with ReActStep, CriticScores, and optional Outfit fields; add CollapsibleSection component and 3 new agentic sections (ReAct trace, Critic score grid with bar charts, style guidelines) to OutfitRecommendationsScreen.tsx; add loading phase text. Independent of FEAT-001 at the TypeScript level but depends on FEAT-001 for runtime data.",
+    "status": "completed",
+    "steps": [
+        "1. Edit frontend/mobile/src/api/recommendations.ts: add ReActStep interface, CriticScores interface, extend Outfit interface with optional critic_score, critic_feedback, critic_iterations, react_trace, style_guidelines_used fields. Do not remove any existing fields or functions.",
+        "2. Edit frontend/mobile/src/screens/OutfitRecommendationsScreen.tsx. Add CRITIC_LABELS constant. Add CollapsibleSection component above OutfitCard. Add loadingPhase state ('stylist'|'critic'|null) and a 1.5s setTimeout in handleGenerate to switch to 'critic' phase; clear on completion. Update loading button text to show 'Le Stylist réfléchit...' then 'Le Critic évalue...'. Inside OutfitCard, add 3 collapsible sections: (a) ReAct trace — renders thought/action/observation for each step; (b) Critic score — total/25, approval status, 5 criteria with progress bars coloured green/primary/red by score, feedback text, iteration count; (c) Style guidelines — bulleted list of rules. Add new StyleSheet entries for all new components.",
+        "3. Run cd frontend/mobile && npx tsc --noEmit and confirm no TypeScript errors.",
+        "4. Commit with message 'feat(frontend): agentic sections in OutfitRecommendationsScreen (ReAct, Critic, RAG)'."
+    ],
+    "acceptance_criteria": [
+        "cd frontend/mobile && npx tsc --noEmit exits with code 0",
+        "OutfitRecommendationsScreen.tsx compiles without errors",
+        "All existing Outfit fields (id, item_ids, occasion, relevance_score, explanation, feedback) remain present and typed correctly",
+        "New fields are optional (?) so existing GET /outfits responses (without agentic fields) do not cause TypeScript or runtime errors",
+        "CollapsibleSection renders and toggles open/closed without errors",
+        "Critic score bars render with correct colour coding (score ≥4: success, ≥3: primary, <3: error)"
+    ],
+    "verification": [
+        "cd frontend/mobile && npx tsc --noEmit"
+    ],
+    "blocked_reason": null,
+    "findings": "1. Both frontend files were already fully implemented in the FEAT-001 commit (20b2bec) — recommendations.ts and OutfitRecommendationsScreen.tsx were added together with the backend. 2. TypeScript check (npx tsc --noEmit) exits with code 0. 3. All acceptance criteria met: ReActStep and CriticScores interfaces present; all Outfit agentic fields optional (?); CollapsibleSection has accessibilityRole='button'; critic bar colours coded green(≥4)/primary(≥3)/error(<3); all 18 new StyleSheet entries present (collapsible, collapsibleHeader, collapsibleTitle, collapsibleChevron, collapsibleBody, reactStep, reactThought, reactAction, reactObservation, criticRow, criticLabel, criticBarBg, criticBarFill, criticScore, criticTotal, criticFeedback, criticIterations, guidelineText). 4. loadingPhase state with 1.5s setTimeout to switch 'Le Stylist réfléchit...' → 'Le Critic évalue...' is implemented. 5. No FEAT-002-specific commit was needed since the files are already committed; only this findings update is committed."
+}

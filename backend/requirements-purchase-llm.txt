@@ -1,0 +1,5 @@
+# Optional: only needed to fine-tune the Purchase LLM (scripts/finetune_purchase_llm.py).
+# The API itself does not import these unless a LoRA adapter is present.
+peft>=0.13
+datasets>=3.0
+accelerate>=1.0

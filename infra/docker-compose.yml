@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: dressme
+      POSTGRES_PASSWORD: dressme
+      POSTGRES_DB: dressme
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dressme -d dressme"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build: ../backend
+    env_file:
+      - ../backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://dressme:dressme@postgres:5432/dressme
+    ports:
+      - "8000:8000"
+    volumes:
+      - wardrobe_photos:/app/media
+    depends_on:
+      postgres:
+        # Without this, "depends_on: - postgres" only waits for the container to
+        # start, not for Postgres to actually accept connections — the backend's
+        # entrypoint runs `alembic upgrade head` immediately on boot and would race
+        # a cold Postgres init.
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  wardrobe_photos:
