@@ -154,3 +154,191 @@ def test_low_head_confidence_marks_the_category_uncertain(monkeypatch):
 
     assert result["category_uncertain"] is True  # 0.55 < CATEGORY_MIN_CONFIDENCE (0.60)
     assert result["style"] is None and result["season"] is None
+
+
+# ---------------------------------------------------------------- OpenAI style fill-in
+def _stub_analysis(monkeypatch, style):
+    monkeypatch.setattr(vision_model, "embed_image_bytes", lambda b: EMBEDDING)
+    monkeypatch.setattr(vision_model, "predict_category", lambda e: ("haut", 0.9))
+    monkeypatch.setattr(vision_model, "predict_colors", lambda e: (["noir"], 0.9))
+    monkeypatch.setattr(vision_model, "predict_pattern", lambda e: ("uni", 0.8))
+    monkeypatch.setattr(vision_model, "predict_style", lambda e: (style, 0.5))
+    monkeypatch.setattr(vision_model, "predict_season", lambda e: (None, 0.4))
+
+
+def test_openai_fills_only_a_missing_style(monkeypatch):
+    from app.ml import vision_llm
+
+    _stub_analysis(monkeypatch, None)
+    monkeypatch.setattr(vision_llm, "available", lambda: True)
+    monkeypatch.setattr(vision_llm, "describe_image", lambda b: {"style": "Sports", "category": "bas"})
+
+    result = vision_model.analyze_image(b"x")
+
+    assert result["style"] == "Sports" and result["style_source"] == "openai"
+    assert result["category"] == "haut"  # category is never delegated
+
+
+def test_openai_is_not_asked_when_fashionclip_already_has_a_style(monkeypatch):
+    from app.ml import vision_llm
+
+    _stub_analysis(monkeypatch, "Casual")
+    monkeypatch.setattr(vision_llm, "available", lambda: True)
+    monkeypatch.setattr(vision_llm, "describe_image", lambda b: pytest.fail("must not be called"))
+
+    result = vision_model.analyze_image(b"x")
+
+    assert result["style"] == "Casual" and result["style_source"] == "fashionclip"
+
+
+def test_disabled_openai_is_never_called(monkeypatch):
+    from app.ml import vision_llm
+
+    _stub_analysis(monkeypatch, None)
+    monkeypatch.setattr(vision_llm, "available", lambda: False)
+    monkeypatch.setattr(vision_llm, "describe_image", lambda b: pytest.fail("must not be called"))
+
+    assert vision_model.analyze_image(b"x")["style"] is None
+
+
+def test_llm_answers_are_validated_against_the_project_vocabulary():
+    from app.ml import vision_llm
+
+    cleaned = vision_llm._validated({
+        "category": "haut", "colors": ["noir", "turquoise", "blanc", "rouge", "bleu"], "pattern": "pois",
+        "style": "Streetwear", "season": "ete", "multiple_items": 1, "confidence": 7,
+    })
+
+    assert cleaned["colors"] == ["noir", "blanc", "rouge"]  # unknown dropped, capped at 3
+    assert cleaned["pattern"] is None and cleaned["style"] is None  # out-of-vocabulary -> None
+    assert cleaned["season"] == "ete" and cleaned["multiple_items"] is True
+    assert cleaned["confidence"] == 1.0
+    assert vision_llm._validated({"category": "chapeau"}) is None  # nothing else usable -> nothing kept
+
+
+def test_a_multiple_items_category_keeps_the_rest_of_the_answer():
+    from app.ml import vision_llm
+
+    kept = vision_llm._validated({"category": "multiple_items", "colors": ["bleu"], "style": "Sports", "season": "ete"})
+
+    assert kept["category"] is None and kept["multiple_items"] is True
+    assert kept["style"] == "Sports" and kept["colors"] == ["bleu"] and kept["season"] == "ete"
+
+
+def test_llm_failure_returns_none_instead_of_raising(monkeypatch):
+    from app.ml import vision_llm
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("VISION_LLM_ENABLED", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setattr(vision_llm.httpx, "post", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("quota")))
+    from PIL import Image
+    import io
+    buffer = io.BytesIO(); Image.new("RGB", (40, 40), "white").save(buffer, format="JPEG")
+
+    assert vision_llm.describe_image(buffer.getvalue()) is None
+
+
+# ---------------------------------------------------------------- prompt versions (CRISPE)
+FROZEN_PROMPT_HASHES = {  # sha256[:16] of each published prompt — see ml/reports/vision_prompt_versions.md
+    "v1": "f2f587b49123ec4c", "v2": "1d3183f371acd0a5", "v3": "f66d2a8e6e3c1e0d",
+    "v4": "b0894b5d25029a50", "v5": "a80994a8c85d4615",
+}
+
+
+def test_published_prompt_versions_are_frozen():
+    import hashlib
+
+    from app.ml import vision_llm
+
+    current = {k: hashlib.sha256(t.encode()).hexdigest()[:16] for k, t in vision_llm.PROMPTS.items() if k in FROZEN_PROMPT_HASHES}
+    assert current == FROZEN_PROMPT_HASHES, "A measured prompt version was edited: add a new version (v6...) instead."
+
+
+def test_every_prompt_version_follows_the_crispe_sections():
+    from app.ml import vision_llm
+
+    for name, prompt in vision_llm.PROMPTS.items():
+        for section in ("# Capacity and role", "# Insight", "# Statement", "# Personality", "# Experiment"):
+            assert section in prompt, f"{name} is missing {section}"
+        assert "hors_perimetre" in prompt and "JSON" in prompt
+
+
+def _fake_openai(monkeypatch, sent):
+    from app.core.config import get_settings
+    from app.ml import vision_llm
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("VISION_LLM_ENABLED", "true")
+    get_settings.cache_clear()
+
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": '{"category": "haut", "colors": ["noir"], "style": "Casual"}'}}]}
+
+    monkeypatch.setattr(vision_llm.httpx, "post", lambda url, **kw: sent.append(kw["json"]) or _Resp())
+    from PIL import Image
+    import io
+
+    buffer = io.BytesIO(); Image.new("RGB", (40, 40), "white").save(buffer, format="JPEG")
+    return vision_llm, buffer.getvalue()
+
+
+def test_the_requested_prompt_version_is_the_one_sent(monkeypatch):
+    sent = []
+    vision_llm, image = _fake_openai(monkeypatch, sent)
+
+    vision_llm.describe_image(image, version="v3")
+    monkeypatch.setenv("VISION_LLM_PROMPT_VERSION", "v2")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    vision_llm.describe_image(image)  # no explicit version -> the configured one
+
+    assert sent[0]["messages"][0]["content"] == vision_llm.PROMPTS["v3"]
+    assert sent[1]["messages"][0]["content"] == vision_llm.PROMPTS["v2"]
+    assert sent[0]["temperature"] == 0 and sent[0]["response_format"] == {"type": "json_object"}
+
+
+def test_an_unknown_version_falls_back_to_the_default(monkeypatch):
+    sent = []
+    vision_llm, image = _fake_openai(monkeypatch, sent)
+
+    assert vision_llm.describe_image(image, version="v99")["category"] == "haut"
+    assert sent[0]["messages"][0]["content"] == vision_llm.PROMPTS[vision_llm.DEFAULT_VERSION]
+
+
+def test_a_transient_openai_error_is_retried_once(monkeypatch):
+    from app.core.config import get_settings
+    from app.ml import vision_llm
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("VISION_LLM_ENABLED", "true")
+    get_settings.cache_clear()
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    codes = iter([429, 200])
+
+    class _Resp:
+        def __init__(self, code):
+            self.status_code = code
+
+        def raise_for_status(self):
+            assert self.status_code == 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": '{"category": "sac", "colors": ["rouge"]}'}}]}
+
+    monkeypatch.setattr(vision_llm.httpx, "post", lambda url, **kw: _Resp(next(codes)))
+    from PIL import Image
+    import io
+
+    buffer = io.BytesIO(); Image.new("RGB", (40, 40), "white").save(buffer, format="JPEG")
+
+    assert vision_llm.describe_image(buffer.getvalue())["category"] == "sac"

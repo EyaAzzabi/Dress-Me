@@ -37,6 +37,12 @@ class Settings(BaseSettings):
 
     openweather_api_key: str | None = None
     llm_api_key: str | None = Field(default=None, repr=False)
+    # Vision Agent's optional OpenAI vision second opinion (app/ml/vision_llm.py). Off by default:
+    # it sends the user's photo to OpenAI and costs a little per call.
+    openai_api_key: str | None = Field(default=None, repr=False)
+    vision_llm_enabled: bool = False
+    vision_llm_model: str = "gpt-4o-mini"
+    vision_llm_prompt_version: str = "v1"  # key of app/ml/vision_llm.py PROMPTS
     llm_provider: str = "none"  # none | groq | gemini | ollama | openai | mistral | llama
     # Optional provider overrides; llama requires both URL and model.
     llm_base_url: str | None = None

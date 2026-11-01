@@ -13,6 +13,9 @@ import numpy as np
 
 from app.ml import vision_model
 
+# [Oral] RÔLE — détecter les photos qui ne sont PAS un vêtement (paysage, visage, capture d'écran...).
+# Zero-shot : 9 phrases "vêtement" contre 13 phrases "pas un vêtement". La probabilité totale portée par les
+# phrases "vêtement" est comparée à un seuil de 30 %. Utilisé par le flux d'achat et l'extraction.
 CLOTHING_GATE_PROMPTS = [
     "a photo of a clothing item", "a photo of a top or shirt", "a photo of trousers or a skirt",
     "a photo of a dress", "a photo of a jacket or coat", "a photo of shoes", "a photo of a handbag",
@@ -33,6 +36,8 @@ def _text_vectors() -> np.ndarray:
     return vision_model._embed_texts(CLOTHING_GATE_PROMPTS + NON_CLOTHING_GATE_PROMPTS)
 
 
+# [Oral] Même mécanique qu'un zero-shot ordinaire, mais on ADDITIONNE les probabilités des 9 phrases "vêtement"
+# (les 9 premières colonnes) au lieu de chercher la meilleure phrase.
 def clothing_probability(embeddings: np.ndarray) -> np.ndarray:
     """Zero-shot probability mass on the clothing prompts, for one (512,) or a batch
     (n, 512) of L2-normalized embeddings."""
