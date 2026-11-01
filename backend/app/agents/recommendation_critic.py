@@ -178,7 +178,12 @@ class CriticAgent:
         occasion_cat = context.get("occasion_category") or ""
         cats = {it.get("category", "") for it in outfit_items}
         has_shoes = "chaussures" in cats
-        if occasion_cat in _FORMAL_CATEGORIES and has_shoes:
+        styles_in_outfit = {it.get("style") for it in outfit_items if it.get("style")}
+        if occasion_cat in _FORMAL_CATEGORIES and "Sports" in styles_in_outfit:
+            scores["occasion"] = 0  # sportswear is never appropriate for a formal occasion
+        elif occasion_cat == "sport" and "Formal" in styles_in_outfit:
+            scores["occasion"] = 0  # evening/formal wear makes no sense for a sport session
+        elif occasion_cat in _FORMAL_CATEGORIES and has_shoes:
             scores["occasion"] = 5
         elif occasion_cat in _FORMAL_CATEGORIES and not has_shoes:
             scores["occasion"] = 3

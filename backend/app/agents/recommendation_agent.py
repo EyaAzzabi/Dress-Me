@@ -1373,6 +1373,11 @@ class RecommendationAgent(BaseAgent):
             if fallback:
                 collected_outfits.append(fallback)
 
+        # The graph's iteration order is not a ranking — the best-scoring outfit must
+        # be shown first, not whichever one the search/critic loop happened to settle
+        # on first.
+        collected_outfits.sort(key=lambda o: o.get("relevance_score") or 0.0, reverse=True)
+
         return {"outfits": collected_outfits}
 
     # ------------------------------------------------------------------
