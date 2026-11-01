@@ -19,6 +19,9 @@ class User(Base):
     # PUT /users/me/avatar, reused across try-on requests rather than re-uploaded
     # each time.
     avatar_photo_url: Mapped[str | None] = mapped_column(String(1024))
+    # "customer" (default) or "stylist" — boutique staff who can see clients'
+    # wardrobes and send them recommendations (app/api/routes/stylist.py).
+    role: Mapped[str] = mapped_column(String(50), server_default="customer", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     clothing_items = relationship("ClothingItem", back_populates="owner", cascade="all, delete-orphan")

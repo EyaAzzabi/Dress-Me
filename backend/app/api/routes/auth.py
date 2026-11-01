@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -17,13 +18,15 @@ def get_me(current_user: User = Depends(get_current_user)) -> User:
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def register(payload: UserCreate, db: Session = Depends(get_db)) -> User:
-    if db.query(User).filter(User.email == payload.email).first():
+    normalized_email = str(payload.email).strip().lower()
+    if db.query(User).filter(func.lower(User.email) == normalized_email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user = User(
-        email=payload.email,
+        email=normalized_email,
         hashed_password=hash_password(payload.password),
         full_name=payload.full_name,
+        role=payload.role,
     )
     db.add(user)
     db.commit()
@@ -33,7 +36,8 @@ def register(payload: UserCreate, db: Session = Depends(get_db)) -> User:
 
 @router.post("/login", response_model=Token)
 def login(payload: UserLogin, db: Session = Depends(get_db)) -> Token:
-    user = db.query(User).filter(User.email == payload.email).first()
+    normalized_email = str(payload.email).strip().lower()
+    user = db.query(User).filter(func.lower(User.email) == normalized_email).first()
     if not user or not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
 

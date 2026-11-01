@@ -4,7 +4,7 @@ const API_URL = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000/api/v1";
 
 export const api = axios.create({ baseURL: API_URL });
 
-/** What POST /wardrobe/ answers (422) when the model isn't sure of a photo's category — often a photo of several pieces. */
+/** What POST /wardrobe/ answers (422) when the model isn't sure of a photo's category Ã¢â‚¬â€ often a photo of several pieces. */
 export interface LowCategoryConfidence {
   message: string;
   suggested_category: string;
@@ -23,15 +23,15 @@ export function getApiError(error: unknown): string {
     if (typeof detail === "string") return detail;
     if (detail && typeof detail.message === "string") return detail.message;
     if (error.response?.status === 0 || !error.response) {
-      return "Impossible de joindre le serveur. Vérifie que l’API DressMe est démarrée.";
+      return "Impossible de joindre le serveur. VÃƒÂ©rifie que lÃ¢â‚¬â„¢API DressMe est dÃƒÂ©marrÃƒÂ©e.";
     }
   }
-  return error instanceof Error ? error.message : "Une erreur est survenue. Réessaie.";
+  return error instanceof Error ? error.message : "Une erreur est survenue. RÃƒÂ©essaie.";
 }
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("dressme_access_token");
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (token) config.headers.Authorization = "Bearer " + token;
   return config;
 });
 
@@ -46,6 +46,9 @@ export interface ClothingItem {
   pattern?: string | null;
   attribute_confidence?: Record<string, number> | null;
   created_at: string;
+  price?: number | null;
+  quantity?: number;
+  sizes?: Record<string, number> | null;
 }
 
 export interface Outfit {
@@ -199,6 +202,65 @@ export interface CurrentUser {
   email: string;
   full_name: string | null;
   avatar_photo_url: string | null;
+  role: "customer" | "stylist";
+}
+
+export interface StylistClient {
+  id: string;
+  full_name: string | null;
+  email: string;
+}
+
+export interface StylistRecommendation {
+  id: string;
+  customer_id: string;
+  item_ids: string[];
+  message: string | null;
+  created_at: string;
+}
+
+export interface CustomerRecommendation {
+  id: string;
+  stylist_id: string;
+  stylist_name: string | null;
+  items: ClothingItem[];
+  message: string | null;
+  created_at: string;
+}
+
+export interface BoutiqueCatalog {
+  stylist_id: string;
+  stylist_name: string;
+  items: ClothingItem[];
+}
+
+export interface BoutiqueOrderCreate {
+  item_id: string;
+  quantity: number;
+  size: string | null;
+  customer_phone: string;
+  delivery_address: string;
+  note: string;
+}
+
+export interface BoutiqueOrder {
+  id: string;
+  stylist_id: string;
+  customer_id: string;
+  customer_name: string | null;
+  customer_email: string | null;
+  item_id: string;
+  item_category: string | null;
+  item_image_url: string | null;
+  item_colors: string[] | null;
+  item_price: number | null;
+  quantity: number;
+  size: string | null;
+  customer_phone: string | null;
+  delivery_address: string | null;
+  note: string | null;
+  status: string;
+  created_at: string;
 }
 
 export async function uploadPhoto(file: File): Promise<string> {
@@ -274,4 +336,3 @@ export async function analyzePhoto(imageUrl: string): Promise<WardrobeAnalysisRe
   const { data } = await api.post<WardrobeAnalysisResponse>("/wardrobe/analyze", { image_url: imageUrl });
   return data;
 }
-

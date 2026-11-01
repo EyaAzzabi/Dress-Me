@@ -43,6 +43,9 @@ class ClothingItem(Base):
     # Vision Agent probabilities per attribute at upload time, e.g. {"category": 0.93, ...}.
     attribute_confidence: Mapped[dict | None] = mapped_column(JSON)
     embedding_id: Mapped[str | None] = mapped_column(String(64))  # id in the Pinecone vector store
+    price: Mapped[float | None] = mapped_column(nullable=True)
+    quantity: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
+    sizes: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # id in the Pinecone vector store
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

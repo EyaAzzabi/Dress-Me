@@ -27,6 +27,12 @@ import {
   parseLowCategoryConfidence,
   LowCategoryConfidence,
   submitOutfitFeedback,
+  StylistClient,
+  StylistRecommendation,
+  CustomerRecommendation,
+  BoutiqueCatalog,
+  BoutiqueOrderCreate,
+  BoutiqueOrder,
 } from "./api";
 import "./styles.css";
 import LlmAssistant from "./LlmAssistant";
@@ -41,7 +47,9 @@ type Screen =
   | "packing"
   | "purchase"
   | "tryon"
-  | "donation";
+  | "donation"
+  | "stylist"
+  | "karim";
 
 const NAV_ITEMS: { id: Screen; label: string; icon: string; group: string }[] = [
   { id: "overview", label: "Accueil", icon: "⌂", group: "TON ESPACE" },
@@ -54,6 +62,8 @@ const NAV_ITEMS: { id: Screen; label: string; icon: string; group: string }[] = 
   { id: "purchase", label: "J’achète ou pas ?", icon: "♡", group: "DÉCOUVRIR" },
   { id: "tryon", label: "Essayage virtuel", icon: "✦", group: "DÉCOUVRIR" },
   { id: "donation", label: "Dons & Seconde vie", icon: "🎁", group: "DÉCOUVRIR" },
+  { id: "stylist", label: "Associations & clients", icon: "♡", group: "CONSEIL" },
+  { id: "karim", label: "Conseils des boutiques", icon: "♡", group: "DÉCOUVRIR" },
 ];
 
 const SCREEN_COPY: Record<Screen, { title: string; subtitle: string }> = {
@@ -67,6 +77,8 @@ const SCREEN_COPY: Record<Screen, { title: string; subtitle: string }> = {
   purchase: { title: "J’achète ou pas ?", subtitle: "Vérifie si une nouvelle pièce s’accorde à ton dressing." },
   tryon: { title: "Essayage virtuel", subtitle: "Visualise une pièce sur ta photo avant de l’ajouter à ton look." },
   donation: { title: "Dons & Seconde vie", subtitle: "Offre une seconde vie à tes vêtements et découvre où les donner en Tunisie." },
+  stylist: { title: "Associations & recommandations", subtitle: "Transforme les vêtements disponibles en looks proposés aux clients." },
+  karim: { title: "Conseils des boutiques", subtitle: "Découvre les produits proposés par les vendeurs DressMe." },
 };
 
 const OCCASIONS = [
@@ -136,6 +148,7 @@ function AuthScreen({ onAuthenticated, initialError }: { onAuthenticated: (token
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"customer" | "stylist">("customer");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(initialError);
 
@@ -146,13 +159,14 @@ function AuthScreen({ onAuthenticated, initialError }: { onAuthenticated: (token
     try {
       if (mode === "register") {
         await api.post("/auth/register", {
-          email: email.trim(),
+          email: email.trim().toLowerCase(),
           password,
           full_name: fullName.trim() || undefined,
+          role,
         });
       }
       const { data } = await api.post<{ access_token: string }>("/auth/login", {
-        email: email.trim(),
+        email: email.trim().toLowerCase(),
         password,
       });
       onAuthenticated(data.access_token);
@@ -193,9 +207,25 @@ function AuthScreen({ onAuthenticated, initialError }: { onAuthenticated: (token
           </p>
           {mode === "register" && (
             <label className="field">
-              <span>Ton nom</span>
-              <input autoComplete="name" value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Ex. Amira Ben Ali" />
+              <span>{role === "stylist" ? "Nom de la boutique" : "Ton nom"}</span>
+              <input
+                autoComplete="name"
+                value={fullName}
+                onChange={(event) => setFullName(event.target.value)}
+                placeholder={role === "stylist" ? "Ex. Karim Boutique" : "Ex. Amira Ben Ali"}
+              />
             </label>
+          )}
+          {mode === "register" && (
+            <fieldset className="role-picker">
+              <legend>Je rejoins DressMe comme</legend>
+              <button type="button" className={role === "customer" ? "active" : ""} onClick={() => setRole("customer")}>
+                <span>Client</span><small>J'organise mon dressing</small>
+              </button>
+              <button type="button" className={role === "stylist" ? "active" : ""} onClick={() => setRole("stylist")}>
+                <span>Boutique</span><small>Je gère mon stock et mes clients</small>
+              </button>
+            </fieldset>
           )}
           <label className="field">
             <span>Adresse e-mail</span>
@@ -223,6 +253,250 @@ function AuthScreen({ onAuthenticated, initialError }: { onAuthenticated: (token
   );
 }
 
+function StylistDashboard({
+  items,
+  clients,
+  recommendations,
+  onAddItem,
+  onRecommend,
+  busy,
+  onInventoryUpdate,
+  onInventoryRefresh,
+}: {
+  items: ClothingItem[];
+  clients: StylistClient[];
+  recommendations: StylistRecommendation[];
+  onAddItem: () => void;
+  onRecommend: (clientId: string, itemIds: string[], message: string) => Promise<void>;
+  busy: string;
+  onInventoryUpdate: (item: ClothingItem) => void;
+  onInventoryRefresh: (items: ClothingItem[]) => void;
+}) {
+  const [clientId, setClientId] = useState(clients[0]?.id ?? "");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [message, setMessage] = useState("");
+  const [editingId, setEditingId] = useState<string>("");
+  const [inventoryDraft, setInventoryDraft] = useState<{
+    quantity: number;
+    price: string;
+    sizes: Record<string, number>;
+  }>({ quantity: 1, price: "", sizes: {} });
+  const [orders, setOrders] = useState<BoutiqueOrder[]>([]);
+  const [newOrdersCount, setNewOrdersCount] = useState(0);
+  const [expandedOrderId, setExpandedOrderId] = useState("");
+  const knownOrderIds = useRef(new Set<string>());
+
+  useEffect(() => {
+    let active = true;
+    const refreshOrders = () => {
+      api.get<BoutiqueOrder[]>("/stylist/orders")
+        .then(({ data }) => {
+          if (!active) return;
+          const newIds = data.filter((order) => !knownOrderIds.current.has(order.id));
+          if (knownOrderIds.current.size > 0 && newIds.length > 0) {
+            setNewOrdersCount((count) => count + newIds.length);
+          }
+          knownOrderIds.current = new Set(data.map((order) => order.id));
+          setOrders(data);
+        })
+        .catch(() => {
+          if (active) setOrders([]);
+        });
+    };
+    refreshOrders();
+    window.addEventListener("focus", refreshOrders);
+    const interval = window.setInterval(refreshOrders, 2000);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", refreshOrders);
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const refreshInventory = () => {
+      api.get<ClothingItem[]>("/wardrobe/")
+        .then(({ data }) => {
+          if (active) onInventoryRefresh(data);
+        })
+        .catch(() => {});
+    };
+    refreshInventory();
+    const interval = window.setInterval(refreshInventory, 2000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [onInventoryRefresh]);
+
+  async function deleteOrder(orderId: string) {
+    await api.delete(`/stylist/orders/${orderId}`);
+    setOrders((current) => current.filter((order) => order.id !== orderId));
+    knownOrderIds.current.delete(orderId);
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await onRecommend(clientId, selectedIds, message);
+    setSelectedIds([]);
+    setMessage("");
+  }
+
+  function startInventoryEdit(item: ClothingItem) {
+    setEditingId(item.id);
+    setInventoryDraft({
+      quantity: item.quantity ?? 1,
+      price: item.price == null ? "" : String(item.price),
+      sizes: { S: item.sizes?.S ?? 0, M: item.sizes?.M ?? 0, L: item.sizes?.L ?? 0, XL: item.sizes?.XL ?? 0 },
+    });
+  }
+
+  async function saveInventory(item: ClothingItem) {
+    const quantity = Math.max(0, Number(inventoryDraft.quantity) || 0);
+    const price = inventoryDraft.price.trim() === "" ? null : Math.max(0, Number(inventoryDraft.price) || 0);
+    const sizes = Object.fromEntries(Object.entries(inventoryDraft.sizes).map(([size, value]) => [size, Math.max(0, Number(value) || 0)]));
+    const { data } = await api.patch<ClothingItem>(`/wardrobe/${item.id}`, { quantity, price, sizes });
+    onInventoryUpdate(data);
+    setEditingId("");
+  }
+
+  useEffect(() => {
+    if (!clientId && clients.length > 0) setClientId(clients[0].id);
+  }, [clientId, clients]);
+
+  const lowStock = items.filter((item) => (item.quantity ?? 0) > 0 && (item.quantity ?? 0) <= 3);
+  const outOfStock = items.filter((item) => (item.quantity ?? 0) <= 0);
+  const sizeTotals = ["S", "M", "L", "XL"].map((size) => ({
+    size,
+    quantity: items.reduce((total, item) => total + (item.sizes?.[size] ?? 0), 0),
+  }));
+
+  return (
+    <div className="stylist-dashboard">
+      <PageHeading title="Espace Gestionnaire de Stock" subtitle="Bienvenue Karim · Pilote ton stock, tes tailles et les conseils clients." />
+      <div className="stats-cards">
+        <div className="summary-card"><span className="summary-icon pink">◈</span><span className="summary-label">Pièces en stock</span><strong>{items.length}</strong><small>articles disponibles</small></div>
+        <div className="summary-card"><span className="summary-icon blue">◎</span><span className="summary-label">Stock faible</span><strong>{lowStock.length}</strong><small>à 3 pièces ou moins</small></div>
+        <div className="summary-card"><span className="summary-icon gold">!</span><span className="summary-label">Ruptures</span><strong>{outOfStock.length}</strong><small>articles indisponibles</small></div>
+        <div className="summary-card"><span className="summary-icon peach">♡</span><span className="summary-label">Clients</span><strong>{clients.length}</strong><small>{recommendations.length} conseils envoyés</small></div>
+        <div className="summary-card"><span className="summary-icon blue">▣</span><span className="summary-label">Commandes</span><strong>{orders.length}</strong><small>commandes reçues</small></div>
+      </div>
+      <section className="content-card stylist-orders">
+        <div className="card-heading"><div><span className="eyebrow">VENTES</span><h3>Commandes reçues</h3></div><span className="boutique-count">{orders.length}</span></div>
+        {orders.length === 0 ? (
+          <EmptyState icon="▣" title="Aucune commande reçue" text="Les commandes passées depuis la page Conseils des boutiques apparaîtront ici." />
+        ) : (
+          <div className="stylist-orders-list">
+            {orders.map((order) => (
+              <article className="stylist-order-card" key={order.id}>
+                <div>
+                  <strong>{order.customer_name || order.customer_email || "Client DressMe"}</strong>
+                  <span>{order.item_category ? categoryLabel(order.item_category) : "Produit"} · Qté {order.quantity}{order.size ? ` · Taille ${order.size}` : ""}</span>
+                </div>
+                {expandedOrderId === order.id && (
+                  <div className="stylist-order-details">
+                    {order.item_image_url && <img src={order.item_image_url} alt={order.item_category || "Produit commandé"} />}
+                    <div className="stylist-order-product-info">
+                      <span className="eyebrow">PIÈCE COMMANDÉE</span>
+                      <strong>{order.item_category ? categoryLabel(order.item_category) : "Produit"}</strong>
+                      <span>{order.item_colors?.join(" · ") || "Coloris disponible"}</span>
+                      <span>Taille {order.size || "—"} · Quantité {order.quantity}</span>
+                      {order.item_price != null && <b>{formatTnd(order.item_price)}</b>}
+                    </div>
+                    <div className="stylist-order-contact">
+                      <strong>Livraison</strong>
+                      {order.customer_phone && <span>📞 {order.customer_phone}</span>}
+                      {order.delivery_address && <span>📍 {order.delivery_address}</span>}
+                      {order.note && <span>“{order.note}”</span>}
+                    </div>
+                  </div>
+                )}
+                <small>{new Date(order.created_at).toLocaleString("fr-TN", { dateStyle: "medium", timeStyle: "short" })}</small>
+                <div className="order-card-actions">
+                  <button type="button" className="order-view-button" onClick={() => setExpandedOrderId((current) => current === order.id ? "" : order.id)}>{expandedOrderId === order.id ? "Masquer" : "Afficher commande"}</button>
+                  <button type="button" className="order-delete-button" onClick={() => void deleteOrder(order.id)} aria-label="Supprimer la commande">Supprimer</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+      {lowStock.length > 0 && <section className="stock-alert"><span>!</span><div><strong>Alertes de réapprovisionnement</strong><p>{lowStock.map((item) => categoryLabel(item.category)).join(", ")} {lowStock.length === 1 ? "nécessite" : "nécessitent"} une attention rapide.</p></div></section>}
+      {newOrdersCount > 0 && (
+        <section className="stock-alert order-live-alert" role="status">
+          <span>✓</span>
+          <div><strong>Nouvelle{newOrdersCount > 1 ? "s" : ""} commande{newOrdersCount > 1 ? "s" : ""}</strong><p>{newOrdersCount} commande{newOrdersCount > 1 ? "s viennent" : " vient"} d’arriver automatiquement.</p></div>
+          <button type="button" className="text-button" onClick={() => setNewOrdersCount(0)}>Marquer comme vue</button>
+        </section>
+      )}
+      <section className="content-card size-overview">
+        <div className="card-heading"><div><span className="eyebrow">TAILLES</span><h3>Disponibilité du stock</h3></div></div>
+        <div className="size-bars">{sizeTotals.map((entry) => <div key={entry.size}><span>{entry.size}</span><strong>{entry.quantity}</strong><i><b style={{ width: `${Math.min(100, entry.quantity * 10)}%` }} /></i></div>)}</div>
+      </section>
+      {items.length > 0 && (
+        <section className="content-card inventory-matrix">
+          <div className="card-heading"><div><span className="eyebrow">GESTION DES TAILLES</span><h3>Stock par produit et par taille</h3></div></div>
+          <div className="inventory-table-wrap">
+            <table>
+              <thead><tr><th>Produit</th><th>Catégorie</th><th>S</th><th>M</th><th>L</th><th>XL</th><th>Quantité</th><th>Prix</th><th>Action</th></tr></thead>
+              <tbody>{items.map((item) => {
+                const editing = editingId === item.id;
+                return <tr key={item.id}>
+                  <td><img src={item.image_url} alt="" /> <span>{item.colors?.[0] ? `${item.colors[0]} ` : ""}{categoryLabel(item.category)}</span></td>
+                  <td>{categoryLabel(item.category)}</td>
+                  {["S", "M", "L", "XL"].map((size) => <td key={size}>{editing ? <input className="inventory-input" type="number" min="0" value={inventoryDraft.sizes[size] ?? 0} onChange={(event) => setInventoryDraft((draft) => ({ ...draft, sizes: { ...draft.sizes, [size]: Number(event.target.value) } }))} /> : <b className={(item.sizes?.[size] ?? 0) === 0 ? "stock-zero" : ""}>{item.sizes?.[size] ?? 0}</b>}</td>)}
+                  <td>{editing ? <input className="inventory-input" type="number" min="0" value={inventoryDraft.quantity} onChange={(event) => setInventoryDraft((draft) => ({ ...draft, quantity: Number(event.target.value) }))} /> : item.quantity ?? 0}</td>
+                  <td>{editing ? <input className="inventory-input inventory-price" type="number" min="0" step="0.01" value={inventoryDraft.price} placeholder="Prix" onChange={(event) => setInventoryDraft((draft) => ({ ...draft, price: event.target.value }))} /> : item.price != null ? `${item.price.toFixed(2)} TND` : "—"}</td>
+                  <td>{editing ? <div className="inventory-actions"><button type="button" onClick={() => void saveInventory(item)}>✓</button><button type="button" onClick={() => setEditingId("")}>×</button></div> : <button className="inventory-edit" type="button" onClick={() => startInventoryEdit(item)}>Modifier</button>}</td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
+        </section>
+      )}
+      <div className="stylist-grid">
+        <section className="content-card">
+          <div className="card-heading"><div><span className="eyebrow">MON STOCK</span><h3>Pièces disponibles</h3></div><button className="button button-primary" type="button" onClick={onAddItem}>＋ Ajouter une pièce</button></div>
+          {items.length === 0 ? <EmptyState icon="◈" title="Ton stock est vide" text="Ajoute les vêtements que Karim souhaite proposer aux clients." /> : (
+            <div className="stylist-stock">
+              {items.map((item) => (
+                <button type="button" key={item.id} className={selectedIds.includes(item.id) ? "stylist-item selected" : "stylist-item"} onClick={() => setSelectedIds((current) => current.includes(item.id) ? [] : [item.id])}>
+                  <img src={item.image_url} alt={categoryLabel(item.category)} />
+                  <span>{categoryLabel(item.category)}</span>
+                  <i>{selectedIds.includes(item.id) ? "✓" : "+"}</i>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+        <form className="content-card stylist-recommendation" onSubmit={submit}>
+          <span className="eyebrow">NOUVELLE RECOMMANDATION</span>
+          <h3>Conseiller un client</h3>
+          <label className="field"><span>Client</span><select value={clientId} onChange={(event) => setClientId(event.target.value)} required><option value="" disabled>Choisir un client</option>{clients.map((client) => <option value={client.id} key={client.id}>{client.full_name || client.email}</option>)}</select></label>
+          <label className="field"><span>Conseil personnalisé</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={4} placeholder="Explique pourquoi ces pièces conviennent au client…" /></label>
+          {selectedIds.length > 0 && (
+            <div className="single-selection-preview">
+              <img src={items.find((item) => item.id === selectedIds[0])?.image_url} alt="" />
+              <div><small>Pièce à recommander</small><strong>{categoryLabel(items.find((item) => item.id === selectedIds[0])?.category)}</strong></div>
+              <button type="button" onClick={() => setSelectedIds([])}>Changer</button>
+            </div>
+          )}
+          <p className="selection-count">{selectedIds.length === 0 ? "Sélectionne exactement une pièce ci-contre." : "Une pièce exactement sera envoyée à ce client."}</p>
+          <button className="button button-primary" type="submit" disabled={!clientId || selectedIds.length === 0 || busy === "stylist-recommend"}>{busy === "stylist-recommend" ? "Envoi…" : "Envoyer la recommandation →"}</button>
+        </form>
+      </div>
+      <section className="content-card stylist-history">
+        <div className="card-heading"><div><span className="eyebrow">HISTORIQUE</span><h3>Derniers conseils envoyés</h3></div></div>
+        {recommendations.length === 0 ? <p className="muted-copy">Aucune recommandation envoyée pour le moment.</p> : recommendations.slice(0, 8).map((recommendation) => {
+          const client = clients.find((entry) => entry.id === recommendation.customer_id);
+          return <article key={recommendation.id}><strong>{client?.full_name || client?.email || "Client"}</strong><span>{recommendation.item_ids.length} pièce(s)</span><p>{recommendation.message || "Sélection de pièces DressMe"}</p></article>;
+        })}
+      </section>
+    </div>
+  );
+}
+
 export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem("dressme_access_token") ?? "");
   const [user, setUser] = useState<CurrentUser | null>(null);
@@ -243,6 +517,10 @@ export default function App() {
   const [scheduled, setScheduled] = useState<ScheduledOutfit[]>([]);
   const [profile, setProfile] = useState<StyleProfile | null>(null);
   const [packingLists, setPackingLists] = useState<PackingList[]>([]);
+  const [stylistClients, setStylistClients] = useState<StylistClient[]>([]);
+  const [stylistRecommendations, setStylistRecommendations] = useState<StylistRecommendation[]>([]);
+  const [customerRecommendations, setCustomerRecommendations] = useState<CustomerRecommendation[]>([]);
+  const [boutiqueCatalogs, setBoutiqueCatalogs] = useState<BoutiqueCatalog[]>([]);
   const [wardrobeFavorites, setWardrobeFavorites] = useState<string[]>(() => readIds(WARDROBE_FAVORITES_KEY));
   const [outfitFavorites, setOutfitFavorites] = useState<string[]>(() => readIds(OUTFIT_FAVORITES_KEY));
   const [donations, setDonations] = useState<DonationItem[]>(() => {
@@ -270,6 +548,10 @@ export default function App() {
   const selectedNav = NAV_ITEMS.find((item) => item.id === screen);
   const displayName = user?.full_name?.split(/\s+/)[0] || "toi";
   const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
+  const stylistMode = user?.role === "stylist";
+  const visibleNavItems = stylistMode
+    ? [NAV_ITEMS[0], { ...NAV_ITEMS.find((item) => item.id === "wardrobe")!, group: "GESTION" }, NAV_ITEMS.find((item) => item.id === "stylist")!]
+    : NAV_ITEMS.filter((item) => item.id !== "stylist");
 
   useEffect(() => {
     if (!token || screen !== "wardrobe") return;
@@ -310,6 +592,39 @@ export default function App() {
       .finally(() => active && setLoading(false));
     return () => { active = false; };
   }, [token]);
+
+  useEffect(() => {
+    if (!token || !stylistMode) return;
+    let active = true;
+    Promise.all([
+      api.get<StylistClient[]>("/stylist/clients"),
+      api.get<StylistRecommendation[]>("/stylist/recommendations"),
+    ])
+      .then(([clients, recommendations]) => {
+        if (!active) return;
+        setStylistClients(clients.data);
+        setStylistRecommendations(recommendations.data);
+      })
+      .catch((cause: unknown) => setError(getApiError(cause)));
+    return () => { active = false; };
+  }, [stylistMode, token]);
+
+  useEffect(() => {
+    if (!token || stylistMode || screen !== "karim") return;
+    let active = true;
+    Promise.all([
+      api.get<CustomerRecommendation[]>("/stylist/my-recommendations"),
+      api.get<BoutiqueCatalog[]>("/stylist/boutique-catalog"),
+    ])
+      .then(([recommendations, catalogs]) => {
+        if (!active) return;
+        setCustomerRecommendations(recommendations.data);
+        setBoutiqueCatalogs(catalogs.data);
+      })
+      .catch((cause: unknown) => { if (active) setError(getApiError(cause)); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [stylistMode, token, screen]);
 
   useEffect(() => {
     if (!token || screen === "overview") return;
@@ -400,6 +715,8 @@ export default function App() {
     setScheduled([]);
     setProfile(null);
     setPackingLists([]);
+    setStylistClients([]);
+    setStylistRecommendations([]);
     setNotice("");
     setError("");
   }
@@ -409,6 +726,25 @@ export default function App() {
     setMenuOpen(false);
     setError("");
     setNotice("");
+  }
+
+  async function sendStylistRecommendation(clientId: string, itemIds: string[], message: string) {
+    setBusy("stylist-recommend");
+    setError("");
+    try {
+      const { data } = await api.post<StylistRecommendation>("/stylist/recommendations", {
+        customer_id: clientId,
+        item_ids: itemIds,
+        message: message.trim() || null,
+      });
+      setStylistRecommendations((current) => [data, ...current]);
+      setNotice("Recommandation envoyée au client.");
+    } catch (cause: unknown) {
+      setError(getApiError(cause));
+      throw cause;
+    } finally {
+      setBusy("");
+    }
   }
 
   function reportError(cause: unknown) {
@@ -839,16 +1175,16 @@ export default function App() {
           </a>
         <div className="sidebar-profile">
           <Avatar user={user} />
-          <div><strong>{displayName}</strong><span>Mon espace personnel</span></div>
+          <div><strong>{displayName}</strong><span>{stylistMode ? "Conseiller DressMe" : "Mon espace personnel"}</span></div>
           <span className="online-dot" aria-label="Connectée" />
         </div>
         <nav className="sidebar-nav" aria-label="Navigation de l’application">
-          {["TON ESPACE", "DÉCOUVRIR"].map((group) => (
+          {["TON ESPACE", stylistMode ? "CONSEIL" : "DÉCOUVRIR", ...(stylistMode ? ["GESTION"] : [])].map((group) => (
             <div className="nav-group" key={group}>
               <p>{group}</p>
-              {NAV_ITEMS.filter((entry) => entry.group === group).map((entry) => (
+              {visibleNavItems.filter((entry) => entry.group === group).map((entry) => (
                 <button className={`nav-link${screen === entry.id ? " nav-link-active" : ""}`} key={entry.id} type="button" onClick={() => navigate(entry.id)}>
-                  <span className="nav-icon">{entry.icon}</span><span>{entry.label}</span>
+                  <span className="nav-icon">{entry.icon}</span><span>{stylistMode && entry.id === "wardrobe" ? "Gestion des vêtements" : entry.label}</span>
                   {entry.id === "wardrobe" && items.length > 0 && <span className="nav-count">{items.length}</span>}
                 </button>
               ))}
@@ -922,7 +1258,23 @@ export default function App() {
 
           {screen === "overview" && (
             <>
+              {stylistMode && (
+                <StylistDashboard
+                  items={items}
+                  clients={stylistClients}
+                  recommendations={stylistRecommendations}
+                  onAddItem={() => navigate("wardrobe")}
+                  onRecommend={sendStylistRecommendation}
+                  busy={busy}
+                  onInventoryUpdate={(updated) => setItems((current) => current.map((item) => item.id === updated.id ? updated : item))}
+                  onInventoryRefresh={setItems}
+                />
+              )}
+              {!stylistMode && (
               <PageHeading title={`Bonjour ${displayName} ✨`} subtitle="Ton style, tes pièces et tes inspirations au même endroit." />
+              )}
+              {!stylistMode && (
+              <>
               <section className="welcome-banner">
                 <div className="welcome-copy"><span className="eyebrow">UN DRESSING QUI TE RESSEMBLE</span><h2>Prête à composer <em>ton prochain look&nbsp;?</em></h2><p>Explore tes pièces et laisse-toi inspirer par des associations faites pour toi.</p><button className="button button-primary" type="button" onClick={() => navigate("outfits")}>Trouver une tenue <span>→</span></button></div>
                 <img className="welcome-photo" src="/tunisian-wardrobe-inspiration.jpg" alt="Un coin dressing inspiré par Sidi Bou Saïd" />
@@ -951,8 +1303,25 @@ export default function App() {
                 <button type="button" onClick={() => navigate("tryon")}><span>✦</span><b>Essayer une pièce</b><small>Projette-toi dans ton look</small><i>→</i></button>
                 <button type="button" onClick={() => navigate("packing")}><span>▣</span><b>Préparer ma valise</b><small>Voyage sans rien oublier</small><i>→</i></button>
               </section>
+              </>
+              )}
             </>
           )}
+
+          {screen === "stylist" && (
+            <StylistDashboard
+              items={items}
+              clients={stylistClients}
+              recommendations={stylistRecommendations}
+              onAddItem={() => navigate("wardrobe")}
+              onRecommend={sendStylistRecommendation}
+              busy={busy}
+              onInventoryUpdate={(updated) => setItems((current) => current.map((item) => item.id === updated.id ? updated : item))}
+              onInventoryRefresh={setItems}
+            />
+          )}
+
+          {screen === "karim" && <CustomerRecommendationsView recommendations={customerRecommendations} catalogs={boutiqueCatalogs} />}
 
           {screen === "wardrobe" && <WardrobeView items={items} favorites={wardrobeFavorites} busy={busy} onAdd={addItem} onDelete={requestDeleteItem} usage={usage} categoryPrompt={categoryPrompt} onConfirmCategory={confirmCategory} onCancelCategory={() => setCategoryPrompt(null)} onWorn={markWorn} onSeasonChange={changeSeason} onToggleFavorite={(id) => toggleFavorite(id, "wardrobe")} />}
           {donationModalItem && (
@@ -975,6 +1344,7 @@ export default function App() {
               busy={busy}
               onCheck={runPurchaseCheck}
               onRestoreResult={setPurchaseResult}
+              onNavigate={navigate}
             />
           )}
           {screen === "donation" && (
@@ -1312,6 +1682,172 @@ function WardrobeIngestionModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+function CustomerRecommendationsView({ recommendations, catalogs }: { recommendations: CustomerRecommendation[]; catalogs: BoutiqueCatalog[] }) {
+  const [selectedBoutique, setSelectedBoutique] = useState("all");
+  const [orderTarget, setOrderTarget] = useState<{ catalog: BoutiqueCatalog; item: ClothingItem } | null>(null);
+  const visibleCatalogs = selectedBoutique === "all"
+    ? catalogs
+    : catalogs.filter((catalog) => catalog.stylist_id === selectedBoutique);
+  const visibleRecommendations = selectedBoutique === "all"
+    ? recommendations
+    : recommendations.filter((recommendation) => recommendation.stylist_id === selectedBoutique);
+
+  return (
+    <div className="customer-recommendations">
+      <PageHeading title="Conseils des boutiques" subtitle="Retrouve les produits disponibles selon leur vendeur ou boutique." />
+      <div className="boutique-filter" role="group" aria-label="Filtrer les boutiques">
+        <label htmlFor="boutique-filter">Boutique</label>
+        <select id="boutique-filter" value={selectedBoutique} onChange={(event) => setSelectedBoutique(event.target.value)}>
+          <option value="all">Toutes les boutiques</option>
+          {catalogs.map((catalog) => (
+            <option value={catalog.stylist_id} key={catalog.stylist_id}>{catalog.stylist_name}</option>
+          ))}
+        </select>
+        <span>{selectedBoutique === "all" ? catalogs.length : 1} boutique(s)</span>
+      </div>
+      {recommendations.length === 0 && catalogs.length === 0 ? (
+        <div className="content-card empty-recommendations">
+          <span>♡</span>
+          <h3>Les boutiques préparent leurs prochaines sélections</h3>
+          <p>Les produits disponibles des vendeurs DressMe apparaîtront ici.</p>
+        </div>
+      ) : <>
+      {visibleRecommendations.map((recommendation) => (
+        <section className="content-card karim-recommendation" key={recommendation.id}>
+          <div className="card-heading">
+            <div>
+              <span className="eyebrow">SÉLECTION PERSONNELLE</span>
+              <h3>Proposé par {recommendation.stylist_name || "Karim"}</h3>
+            </div>
+            <small>{new Date(recommendation.created_at).toLocaleDateString("fr-TN", { day: "numeric", month: "long" })}</small>
+          </div>
+          {recommendation.message && <p className="karim-message">« {recommendation.message} »</p>}
+          <div className="recommendation-products">
+            {recommendation.items.map((item) => (
+              <article className="recommendation-product" key={item.id}>
+                <div className="recommendation-product-image">
+                  <img src={item.image_url} alt={categoryLabel(item.category)} />
+                  <span className="availability-badge">Disponible</span>
+                  <button type="button" className="product-favorite" aria-label="Ajouter aux favoris">♡</button>
+                </div>
+                <div className="recommendation-product-info">
+                  <span className="product-category">{categoryLabel(item.category)}</span>
+                  <strong>{item.colors?.length ? item.colors.join(" · ") : "Coloris disponible"}</strong>
+                  {item.price != null && <b className="product-price">{formatTnd(item.price)}</b>}
+                  {item.sizes && <div className="product-sizes">{Object.entries(item.sizes).filter(([, quantity]) => quantity > 0).map(([size]) => <span key={size}>{size}</span>)}</div>}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ))}
+      {visibleCatalogs.map((catalog) => (
+        <section className="content-card boutique-catalog" key={catalog.stylist_id}>
+          <div className="boutique-heading">
+            <div>
+              <span className="boutique-avatar">{catalog.stylist_name.trim().slice(0, 1).toLocaleUpperCase("fr")}</span>
+              <div><span className="eyebrow">BOUTIQUE PARTENAIRE</span>
+              <h3>{catalog.stylist_name}</h3>
+              </div>
+            </div>
+            <span className="boutique-count">{catalog.items.length} pièce{catalog.items.length === 1 ? "" : "s"}</span>
+          </div>
+          <div className="recommendation-products">
+            {catalog.items.map((item) => (
+              <article className="recommendation-product" key={item.id}>
+                <div className="recommendation-product-image">
+                  <img src={item.image_url} alt={`${catalog.stylist_name} — ${categoryLabel(item.category)}`} />
+                  <span className="availability-badge">Disponible</span>
+                  <button type="button" className="product-favorite" aria-label="Ajouter aux favoris">♡</button>
+                </div>
+                <div className="recommendation-product-info">
+                  <span className="product-category">{categoryLabel(item.category)}</span>
+                  <strong>{item.colors?.length ? item.colors.join(" · ") : catalog.stylist_name}</strong>
+                  {item.price != null && <b className="product-price">{formatTnd(item.price)}</b>}
+                  {item.sizes && <div className="product-sizes">{Object.entries(item.sizes).filter(([, quantity]) => quantity > 0).map(([size]) => <span key={size}>{size}</span>)}</div>}
+                  <button type="button" className="order-product-button" onClick={() => setOrderTarget({ catalog, item })}>Commander</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ))}
+      </>
+      }
+      {orderTarget && (
+        <ProductOrderModal
+          catalog={orderTarget.catalog}
+          item={orderTarget.item}
+          onClose={() => setOrderTarget(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ProductOrderModal({ catalog, item, onClose }: {
+  catalog: BoutiqueCatalog;
+  item: ClothingItem;
+  onClose: () => void;
+}) {
+  const availableSizes = Object.entries(item.sizes || {}).filter(([, quantity]) => quantity > 0).map(([size]) => size);
+  const [size, setSize] = useState(availableSizes[0] || "");
+  const [quantity, setQuantity] = useState(1);
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setMessage("");
+    try {
+      const payload: BoutiqueOrderCreate = {
+        item_id: item.id,
+        quantity,
+        size: size || null,
+        customer_phone: phone,
+        delivery_address: address,
+        note,
+      };
+      await api.post("/stylist/orders", payload);
+      setMessage("Commande envoyée à la boutique.");
+    } catch (cause: unknown) {
+      setMessage(getApiError(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="product-order-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <form className="product-order-modal" onSubmit={submit}>
+        <button type="button" className="product-order-close" onClick={onClose} aria-label="Fermer">×</button>
+        <span className="eyebrow">COMMANDER CE PRODUIT</span>
+        <h2>{catalog.stylist_name}</h2>
+        <div className="product-order-summary">
+          <img src={item.image_url} alt={categoryLabel(item.category)} />
+          <div><strong>{categoryLabel(item.category)}</strong><small>{item.colors?.join(" · ") || "Coloris disponible"}</small><b>{formatTnd(item.price) ?? "Prix n.c."}</b></div>
+        </div>
+        <div className="product-order-fields">
+          {availableSizes.length > 0 && (
+            <label>Taille<select value={size} onChange={(event) => setSize(event.target.value)}>{availableSizes.map((entry) => <option key={entry} value={entry}>{entry}</option>)}</select></label>
+          )}
+          <label>Quantité<input type="number" min="1" max={item.quantity || 1} value={quantity} onChange={(event) => setQuantity(Math.max(1, Number(event.target.value) || 1))} /></label>
+          <label>Téléphone<input type="tel" required value={phone} onChange={(event) => setPhone(event.target.value)} /></label>
+          <label className="product-order-full">Adresse de livraison<textarea required rows={3} value={address} onChange={(event) => setAddress(event.target.value)} /></label>
+          <label className="product-order-full">Note pour la boutique<textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} /></label>
+        </div>
+        {message && <p className={message.startsWith("Commande") ? "order-success" : "order-error"}>{message}</p>}
+        <button type="submit" className="button button-primary product-order-submit" disabled={busy}>{busy ? "Envoi…" : "Confirmer la commande"}</button>
+      </form>
     </div>
   );
 }
@@ -2345,16 +2881,19 @@ function openStorePage(url?: string | null) {
   if (url) window.open(url, "_blank", "noopener,noreferrer");
 }
 
-function PurchaseView({ result, busy, onCheck, onRestoreResult }: {
+function PurchaseView({ result, busy, onCheck, onRestoreResult, onNavigate }: {
   result: PurchaseResult | null;
   busy: string;
   onCheck: (file: File) => Promise<void>;
   onRestoreResult: (result: PurchaseResult) => void;
+  onNavigate: (screen: Screen) => void;
 }) {
   const [history, setHistory] = useState<PurchaseHistoryItem[]>([]);
   const [wishlist, setWishlist] = useState<WishlistEntry[]>([]);
   const [shopTab, setShopTab] = useState<"history" | "wishlist">("history");
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
+  const [boutiqueCatalogs, setBoutiqueCatalogs] = useState<BoutiqueCatalog[]>([]);
+  const [orderTarget, setOrderTarget] = useState<{ catalog: BoutiqueCatalog; item: ClothingItem } | null>(null);
   const brands = result?.tunisian_brands ?? [];
   const savedKeys = useMemo(() => new Set(wishlist.map((item) => item.item_key)), [wishlist]);
 
@@ -2362,6 +2901,11 @@ function PurchaseView({ result, busy, onCheck, onRestoreResult }: {
   const refreshWishlist = () => { getWishlist().then(setWishlist).catch(() => {}); };
 
   useEffect(() => { refreshHistory(); refreshWishlist(); }, []);
+  useEffect(() => {
+    api.get<BoutiqueCatalog[]>("/stylist/boutique-catalog")
+      .then(({ data }) => setBoutiqueCatalogs(data))
+      .catch(() => setBoutiqueCatalogs([]));
+  }, []);
   useEffect(() => { refreshHistory(); }, [result]);
 
   const verdictText =
@@ -2492,6 +3036,39 @@ function PurchaseView({ result, busy, onCheck, onRestoreResult }: {
               </div>
             )}
 
+            {boutiqueCatalogs.length > 0 && (
+              <div className="boutique-alternatives-section">
+                <div className="boutique-alternatives-heading">
+                  <div>
+                    <h3>Boutiques DressMe recommandées</h3>
+                    <p className="section-hint">Produits disponibles proposés par nos vendeurs partenaires.</p>
+                  </div>
+                  <button type="button" className="text-button" onClick={() => onNavigate("karim")}>Voir toutes les boutiques →</button>
+                </div>
+                <div className="boutique-alternatives-grid">
+                  {boutiqueCatalogs.flatMap((catalog) =>
+                    catalog.items.slice(0, 3).map((item) => (
+                      <article className="boutique-alternative-card" key={`${catalog.stylist_id}-${item.id}`}>
+                        <button type="button" className="boutique-alternative-image" onClick={() => onNavigate("karim")} aria-label={`Voir le produit chez ${catalog.stylist_name}`}>
+                          <img src={item.image_url} alt={categoryLabel(item.category)} />
+                          <span>Disponible</span>
+                        </button>
+                        <div className="boutique-alternative-info">
+                          <small>{catalog.stylist_name}</small>
+                          <b>{categoryLabel(item.category)}</b>
+                          <strong>{formatTnd(item.price) ?? "Prix n.c."}</strong>
+                          <div className="boutique-alternative-actions">
+                            <button type="button" onClick={() => onNavigate("karim")}>Découvrir en boutique</button>
+                            <button type="button" className="boutique-order-button" onClick={() => setOrderTarget({ catalog, item })}>Commander</button>
+                          </div>
+                        </div>
+                      </article>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
             {brands.length > 0 && (
               <div className="brands-section">
                 <h3>Marques tunisiennes pour toi</h3>
@@ -2612,6 +3189,13 @@ function PurchaseView({ result, busy, onCheck, onRestoreResult }: {
         </div>
       )}
     </section>
+    {orderTarget && (
+      <ProductOrderModal
+        catalog={orderTarget.catalog}
+        item={orderTarget.item}
+        onClose={() => setOrderTarget(null)}
+      />
+    )}
   </>;
 }
 
