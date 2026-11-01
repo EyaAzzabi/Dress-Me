@@ -233,29 +233,32 @@ class RecommendationAgentV2(BaseAgent):
             weather_data: Weather conditions
 
         Returns:
-            Filtered items list
+            Filtered items list (never empty—falls back to all items if filtered result is empty)
         """
         filtered = []
 
         for item in items:
-            # Check season match
+            # Check season match (only filter if item has explicit season different from "all")
             if season:
                 item_season = getattr(item, "season", None)
-                if item_season and season.lower() not in str(item_season).lower():
-                    continue
+                if item_season and item_season.lower() != "all":
+                    if season.lower() not in str(item_season).lower():
+                        continue  # Skip items from wrong season
 
             # Check temperature/material appropriateness
             temp = weather_data.get("temperature", 20)
             material = getattr(item, "material", None)
             if material:
                 material_lower = str(material).lower()
-                if temp < 10 and "lin" in material_lower:
-                    continue  # Linen too cold
-                if temp > 25 and "laine" in material_lower:
-                    continue  # Wool too hot
+                # Only filter extreme mismatches
+                if temp < 5 and "lin" in material_lower:
+                    continue  # Linen way too cold
+                if temp > 30 and "laine" in material_lower:
+                    continue  # Wool way too hot
 
             filtered.append(item)
 
+        # Never return empty list—use original if filtering is too strict
         return filtered if filtered else items
 
     def _load_sft_model(self, user_id: str) -> Any:
