@@ -1,0 +1,26 @@
+{
+  "project_type": "FastAPI + SQLAlchemy backend, Python 3.12, single Docker image built from backend/ only",
+  "language": "Python 3.12",
+  "build_system": "No build step — source is run directly. Dependencies in requirements.txt, venv at backend/venv/.",
+  "test_framework": "pytest 8.3, venv at backend/venv/Scripts/python.exe, tests live in backend/tests/",
+  "build_command": "none (no compilation step)",
+  "test_command": "cd backend && .\\venv\\Scripts\\python.exe -m pytest tests\\ -x -q",
+  "verification_instructions": "1. cd to backend/. 2. Run: .\\venv\\Scripts\\python.exe -m pytest tests\\test_recommendation_agent.py -x -q (16 tests must pass). 3. Run: .\\venv\\Scripts\\python.exe -m pytest tests\\ -x -q (all tests must pass).",
+  "snapshot_or_generated_files": "Model artifacts saved to backend/app/ml/artifacts/outfit_transformer.pt and backend/app/ml/artifacts/reward_model_{user_id[:8]}.pt via torch.save. These are NOT committed — they are runtime artifacts written by the training functions.",
+  "environment_constraints": "PyTorch 2.15.0+cpu is installed — CPU-only, no CUDA. All torch operations must work on CPU. All new torch code must be wrapped in try/except so the agent degrades gracefully if torch is unavailable. Do NOT restart any running dev server. Run tests from the backend/ directory so imports resolve correctly.",
+  "contribution_requirements": "Additive-only: do NOT break any existing test. Do NOT modify any agent file other than recommendation_agent.py. Keep all existing fields in outfit_dict. Use try/except around all torch operations.",
+  "key_patterns": "1. Module-level try/except imports for optional dependencies: see how compatibility_model and vector_store are imported at the top of recommendation_agent.py. 2. Artifacts loaded with @lru_cache + Path(__file__).resolve().parent / 'artifacts' / 'filename': see compatibility_model.py. 3. State is a TypedDict (total=False); new keys are additive. 4. Tests use _FakeItem (see test_recommendation_agent.py) and monkeypatch for module-level attributes. 5. conftest.py autouse fixture sets LLM_PROVIDER=none and RANKING_ENABLED=false — new tests should not depend on env vars. 6. vector_store.fetch_embeddings(item_ids) returns dict[Any, list[float]] where keys are both str and original type; see backend/app/db/vector_store.py.",
+  "relevant_files": [
+    "backend/app/ml/compatibility_model.py",
+    "backend/app/ml/vision_model.py",
+    "backend/app/agents/recommendation_agent.py",
+    "backend/app/db/vector_store.py",
+    "backend/app/models/recommendation_feedback.py",
+    "backend/app/models/outfit.py",
+    "backend/app/models/clothing_item.py",
+    "backend/tests/test_recommendation_agent.py",
+    "backend/tests/test_compatibility_model.py",
+    "backend/tests/conftest.py"
+  ],
+  "directory_structure": "backend/app/ml/ — ML models (compatibility_model.py, vision_model.py, ranking_model.py, garment_types.py) + artifacts/ subdirectory. backend/app/agents/ — all agent files (recommendation_agent.py is the one to modify). backend/app/models/ — SQLAlchemy ORM models (RecommendationFeedback, Outfit, ClothingItem). backend/app/db/ — DB session + vector_store (Pinecone + local JSON fallback). backend/tests/ — pytest tests, one file per module."
+}

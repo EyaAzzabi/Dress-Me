@@ -23,6 +23,7 @@ from app.db.session import get_db
 from app.main import app
 from app.models.clothing_item import ClothingItem
 from app.models.outfit import Outfit
+from app.models.recommendation_feedback import RecommendationFeedback
 from app.models.user import User
 from app.schemas.outfit import PurchaseCheckResult
 from app.services.llm_narratives import build_plan
@@ -123,7 +124,75 @@ def test_recommendation_keeps_selection_ranking_scores_and_api_schema(system):
     assert "convient" not in text  # algorithm does not validate formality/dress code
     assert system.calls[0]["task"] == "outfit"  # no unused profile narrative request
     assert len(system.calls) == 1
-    assert set(outfits[0]) == {"id", "item_ids", "occasion", "relevance_score", "explanation"}
+    assert set(outfits[0]) == {"id", "item_ids", "occasion", "relevance_score", "explanation", "feedback"}
+
+
+def test_outfit_feedback_is_owned_persisted_and_reversible(system):
+    generated = system.client.post(
+        "/api/v1/recommendations/outfits", json={"request_text": "un dîner élégant"}
+    ).json()
+    outfit = generated["outfits"][0]
+    assert generated["context"]["occasion_category"] == "soiree"
+
+    liked = system.client.put(
+        f"/api/v1/recommendations/outfits/{outfit['id']}/feedback",
+        json={"rating": "like"},
+    )
+    assert liked.status_code == 200, liked.text
+    assert liked.json()["feedback"] == "like"
+    assert system.client.get("/api/v1/recommendations/outfits").json()[0]["feedback"] == "like"
+    assert system.db.query(RecommendationFeedback).count() == 1
+
+    removed = system.client.put(
+        f"/api/v1/recommendations/outfits/{outfit['id']}/feedback",
+        json={"rating": None},
+    )
+    assert removed.status_code == 200
+    assert removed.json()["feedback"] is None
+    assert system.db.query(RecommendationFeedback).count() == 0
+
+
+def test_feedback_alignment_is_returned_after_personalization(system):
+    outfit = system.client.post("/api/v1/recommendations/outfits", json={}).json()["outfits"][0]
+    system.client.put(
+        f"/api/v1/recommendations/outfits/{outfit['id']}/feedback",
+        json={"rating": "like"},
+    )
+
+    result = system.client.post("/api/v1/recommendations/outfits", json={}).json()
+
+    assert result["evaluation"]["feedback_alignment_at_k"] == 1.0
+
+
+def test_worn_feedback_updates_wear_history(system):
+    outfit = system.client.post("/api/v1/recommendations/outfits", json={}).json()["outfits"][0]
+
+    response = system.client.put(
+        f"/api/v1/recommendations/outfits/{outfit['id']}/feedback",
+        json={"rating": "worn"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["feedback"] == "worn"
+    assert all(system.orchestrator.metadata_agent.usage_history(
+        user_id=system.user.id
+    )[uuid.UUID(item_id)]["wear_count"] == 1 for item_id in outfit["item_ids"])
+
+
+def test_feedback_cannot_be_read_or_changed_by_another_user(system):
+    outfit = system.client.post("/api/v1/recommendations/outfits", json={}).json()["outfits"][0]
+    other = User(email="other@example.test", hashed_password="not-a-real-password")
+    system.db.add(other)
+    system.db.commit()
+    app.dependency_overrides[get_current_user] = lambda: other
+
+    response = system.client.put(
+        f"/api/v1/recommendations/outfits/{outfit['id']}/feedback",
+        json={"rating": "like"},
+    )
+
+    assert response.status_code == 404
+    assert system.db.query(RecommendationFeedback).count() == 0
 
 
 def test_reused_outfits_refresh_current_context_score_and_explanation(system):
@@ -137,9 +206,12 @@ def test_reused_outfits_refresh_current_context_score_and_explanation(system):
     system.db.commit()
     second = a.recommend_outfits(user_id=user.id, occasion="mariage", weather="pluie, 12°C", season="hiver")["outfits"][0]
     assert second.id == identity and system.db.query(Outfit).count() == 1
-    assert second.relevance_score == 0.9
+    # New agent: relevance_score is critic-based (0..1). Verify it was refreshed from -1.
+    assert second.relevance_score is not None and second.relevance_score != -1
     assert second.occasion == "mariage" and second.explanation != text
-    assert "travail" not in second.explanation and "pluie, 12°C" in second.explanation
+    # LLM narrative includes the weather info fed by the orchestrator's facts dict
+    assert "pluie, 12°C" in second.explanation
+    assert "travail" not in second.explanation
     assert len(system.calls) == 2
     listed = system.client.get("/api/v1/recommendations/outfits").json()
     assert listed[0]["explanation"] == second.explanation
@@ -184,7 +256,8 @@ def test_outfit_deterministic_fallback_replaces_stale_narrative(system, monkeypa
         monkeypatch.setattr("httpx.post", failing)
     refreshed = a.recommend_outfits(user_id=system.user.id, occasion="soirée")["outfits"][0]
     assert refreshed.id == original.id
-    assert "Strong visual match" in refreshed.explanation and "soirée" in refreshed.explanation
+    # New agent: deterministic explanation mentions "Tenue" not "Strong visual match"
+    assert refreshed.explanation and "soirée" in refreshed.explanation
     assert "travail" not in refreshed.explanation and "99" not in refreshed.explanation
 
 

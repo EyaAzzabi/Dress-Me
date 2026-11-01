@@ -18,7 +18,14 @@ import { useFocusEffect } from "@react-navigation/native";
 
 import { platformShadow } from "@/utils/platformStyles";
 import { getPlannedOutfit, planOutfit } from "@/api/calendar";
-import { listOutfits, Outfit, recommendOutfits } from "@/api/recommendations";
+import {
+  feedbackOutfit,
+  listOutfits,
+  Outfit,
+  OutfitFeedback,
+  recommendOutfits,
+  ReActStep,
+} from "@/api/recommendations";
 import { listWardrobeItems } from "@/api/wardrobe";
 import { TunisianPhotoHero } from "@/components/TunisianPhotoHero";
 import { useTheme } from "@/theme/ThemeContext";
@@ -35,6 +42,42 @@ const OCCASIONS = [
 
 const CITIES = ["Tunis", "Sousse", "Sfax", "Djerba"];
 const FAVORITE_OUTFITS_STORAGE_KEY = "dressme_favorite_outfits";
+
+const CRITIC_LABELS = {
+  meteo: "Météo",
+  occasion: "Occasion",
+  couleurs: "Harmonie des couleurs",
+  completude: "Tenue complète",
+  fraicheur: "Fraîcheur",
+} as const;
+
+function CollapsibleSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  const { colors } = useTheme();
+  const [open, setOpen] = useState(false);
+  return (
+    <View style={styles.collapsible}>
+      <Pressable
+        onPress={() => setOpen((o) => !o)}
+        accessibilityRole="button"
+        style={styles.collapsibleHeader}
+      >
+        <Text style={[styles.collapsibleTitle, { color: colors.text }]}>
+          {title}
+        </Text>
+        <Text style={[styles.collapsibleChevron, { color: colors.textMuted }]}>
+          {open ? "▲" : "▼"}
+        </Text>
+      </Pressable>
+      {open && <View style={styles.collapsibleBody}>{children}</View>}
+    </View>
+  );
+}
 
 function getErrorMessage(error: unknown): string {
   if (isAxiosError(error) && typeof error.response?.data?.detail === "string") {
@@ -86,14 +129,18 @@ function OutfitCard({
   isFavorite,
   onToggleFavorite,
   onSchedule,
+  onFeedback,
   isScheduling,
+  isSubmittingFeedback,
 }: {
   outfit: Outfit;
   itemsById: Map<string, ClothingItem>;
   isFavorite: boolean;
   onToggleFavorite: () => void;
   onSchedule: () => void;
+  onFeedback: (rating: OutfitFeedback | null) => void;
   isScheduling: boolean;
+  isSubmittingFeedback: boolean;
 }) {
   const { colors } = useTheme();
   const [expanded, setExpanded] = useState(false);
@@ -177,6 +224,76 @@ function OutfitCard({
           {expanded ? "Réduire ↑" : "Voir le conseil de style ↓"}
         </Text>
       </Pressable>
+      {outfit.react_trace && outfit.react_trace.length > 0 && (
+        <CollapsibleSection title="🧠 Raisonnement de l'agent">
+          {outfit.react_trace.map((step: ReActStep, i: number) => (
+            <View key={i} style={styles.reactStep}>
+              <Text style={[styles.reactThought, { color: colors.text }]}>
+                💭 {step.thought}
+              </Text>
+              <Text style={[styles.reactAction, { color: colors.textMuted }]}>
+                ⚙ {String((step.action as { tool?: string }).tool ?? "")}({JSON.stringify((step.action as { args?: unknown }).args)})
+              </Text>
+              <Text style={[styles.reactObservation, { color: colors.textSubtle }]}>
+                👁 {JSON.stringify((step.observation as { result?: unknown }).result).slice(0, 120)}
+              </Text>
+            </View>
+          ))}
+        </CollapsibleSection>
+      )}
+      {outfit.critic_score && (
+        <CollapsibleSection title="⚖️ Avis du Critic">
+          <Text style={[styles.criticTotal, { color: colors.text }]}>
+            Score : {outfit.critic_score.total}/25
+            {outfit.critic_score.approved ? " ✅" : " ⚠️"}
+          </Text>
+          {(Object.entries(outfit.critic_score.scores) as Array<[keyof typeof CRITIC_LABELS, number]>).map(([key, value]) => (
+            <View key={key} style={styles.criticRow}>
+              <Text style={[styles.criticLabel, { color: colors.textMuted }]}>
+                {CRITIC_LABELS[key]}
+              </Text>
+              <View style={[styles.criticBarBg, { backgroundColor: colors.border }]}>
+                <View
+                  style={[
+                    styles.criticBarFill,
+                    {
+                      width: `${(value / 5) * 100}%` as `${number}%`,
+                      backgroundColor:
+                        value >= 4
+                          ? colors.success
+                          : value >= 3
+                          ? colors.primary
+                          : colors.error,
+                    },
+                  ]}
+                />
+              </View>
+              <Text style={[styles.criticScore, { color: colors.text }]}>
+                {value}/5
+              </Text>
+            </View>
+          ))}
+          {outfit.critic_feedback && (
+            <Text style={[styles.criticFeedback, { color: colors.textMuted }]}>
+              {outfit.critic_feedback}
+            </Text>
+          )}
+          {outfit.critic_iterations !== undefined && (
+            <Text style={[styles.criticIterations, { color: colors.textSubtle }]}>
+              {outfit.critic_iterations} itération{outfit.critic_iterations !== 1 ? "s" : ""}
+            </Text>
+          )}
+        </CollapsibleSection>
+      )}
+      {outfit.style_guidelines_used && outfit.style_guidelines_used.length > 0 && (
+        <CollapsibleSection title="📚 Guidelines de style utilisées">
+          {outfit.style_guidelines_used.map((rule: string, i: number) => (
+            <Text key={i} style={[styles.guidelineText, { color: colors.textMuted }]}>
+              • {rule}
+            </Text>
+          ))}
+        </CollapsibleSection>
+      )}
       <Pressable
         onPress={onSchedule}
         disabled={isScheduling}
@@ -193,6 +310,33 @@ function OutfitCard({
           ? <ActivityIndicator size="small" color="#FFFFFF" />
           : <Text style={styles.scheduleButtonText}>📅  Planifier cette tenue</Text>}
       </Pressable>
+      <View style={styles.feedbackActions}>
+        {([
+          ["like", "👍 J’aime"],
+          ["dislike", "👎 Pas pour moi"],
+          ["worn", "✓ Déjà portée"],
+        ] as const).map(([rating, label]) => (
+          <Pressable
+            key={rating}
+            onPress={() => onFeedback(outfit.feedback === rating ? null : rating)}
+            disabled={isSubmittingFeedback}
+            accessibilityRole="button"
+            accessibilityState={{ selected: outfit.feedback === rating, disabled: isSubmittingFeedback }}
+            style={[
+              styles.feedbackButton,
+              {
+                borderColor: outfit.feedback === rating ? colors.primary : colors.border,
+                backgroundColor: outfit.feedback === rating ? colors.pillBg : colors.surface,
+                opacity: isSubmittingFeedback ? 0.6 : 1,
+              },
+            ]}
+          >
+            <Text style={[styles.feedbackButtonText, { color: colors.text }]}>
+              {isSubmittingFeedback ? "…" : label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
     </View>
   );
 }
@@ -205,13 +349,17 @@ export default function OutfitRecommendationsScreen() {
   const [showFavorites, setShowFavorites] = useState(false);
   const [wardrobeLoading, setWardrobeLoading] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [loadingPhase, setLoadingPhase] = useState<"stylist" | "critic" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [occasion, setOccasion] = useState<string | null>(null);
+  const [requestText, setRequestText] = useState("");
   const [city, setCity] = useState<string | null>(null);
   const [planDate, setPlanDate] = useState(() => formatLocalDate(new Date()));
   const [planningOutfitId, setPlanningOutfitId] = useState<string | null>(null);
   const [planMessage, setPlanMessage] = useState<string | null>(null);
   const [planMessageIsError, setPlanMessageIsError] = useState(false);
+  const [feedbackOutfitId, setFeedbackOutfitId] = useState<string | null>(null);
+  const [feedbackAlignment, setFeedbackAlignment] = useState<number | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -253,18 +401,37 @@ export default function OutfitRecommendationsScreen() {
 
   async function handleGenerate() {
     setLoading(true);
+    setLoadingPhase(null);
     setError(null);
+    const phaseTimer = setTimeout(() => setLoadingPhase("critic"), 1500);
     try {
       const data = await recommendOutfits({
         occasion: occasion ?? undefined,
+        request_text: requestText.trim() || undefined,
         season: season.id,
         city: city ?? undefined,
       });
       setOutfits(data.outfits);
+      setFeedbackAlignment(data.evaluation?.feedback_alignment_at_k ?? null);
     } catch (err: unknown) {
       setError(getErrorMessage(err));
     } finally {
+      clearTimeout(phaseTimer);
       setLoading(false);
+      setLoadingPhase(null);
+    }
+  }
+
+  async function handleFeedback(outfitId: string, rating: OutfitFeedback | null) {
+    setFeedbackOutfitId(outfitId);
+    setError(null);
+    try {
+      const updated = await feedbackOutfit(outfitId, rating);
+      setOutfits((current) => current.map((outfit) => outfit.id === updated.id ? updated : outfit));
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
+    } finally {
+      setFeedbackOutfitId(null);
     }
   }
 
@@ -368,6 +535,22 @@ export default function OutfitRecommendationsScreen() {
               );
             })}
           </ScrollView>
+          <Text style={[styles.sectionTitle, styles.cityTitle, { color: colors.text }]}>
+            Une envie précise ? <Text style={[styles.optional, { color: colors.textMuted }]}>· facultatif</Text>
+          </Text>
+          <TextInput
+            value={requestText}
+            onChangeText={setRequestText}
+            placeholder="Ex. Je vais dîner au restaurant après le travail"
+            placeholderTextColor={colors.textSubtle}
+            maxLength={500}
+            multiline
+            accessibilityLabel="Décris la tenue que tu recherches"
+            style={[
+              styles.requestInput,
+              { color: colors.text, backgroundColor: colors.inputBg, borderColor: colors.inputBorder },
+            ]}
+          />
 
           <Text style={[styles.sectionTitle, styles.cityTitle, { color: colors.text }]}>
             Météo locale <Text style={[styles.optional, { color: colors.textMuted }]}>· facultatif</Text>
@@ -415,19 +598,34 @@ export default function OutfitRecommendationsScreen() {
         >
           {loading
             ? <ActivityIndicator color="#FFFFFF" />
-            : <>
+            : null}
+          {loading && loadingPhase === null
+            ? <Text style={styles.generateText}>Le Stylist réfléchit...</Text>
+            : null}
+          {loading && loadingPhase === "critic"
+            ? <Text style={styles.generateText}>Le Critic évalue...</Text>
+            : null}
+          {!loading
+            ? <>
                 <Text style={styles.generateIcon}>🪄</Text>
                 <Text style={styles.generateText}>
                   {wardrobeLoading ? "Chargement du dressing…" : "Créer mes idées de looks"}
                 </Text>
               </>
-          }
+            : null}
         </Pressable>
 
         {error && (
           <View style={[styles.errorBox, { backgroundColor: colors.errorBg, borderColor: colors.error }]}>
             <Text style={[styles.errorText, { color: colors.error }]}>⚠ {error}</Text>
           </View>
+        )}
+
+        {feedbackAlignment !== null && (
+          <Text style={[styles.evaluationNote, { color: colors.textMuted }]}>
+            Alignement avec tes retours précédents : {feedbackAlignment >= 0 ? "+" : ""}
+            {feedbackAlignment.toFixed(2)}
+          </Text>
         )}
 
         {!wardrobeLoading && wardrobe.length === 0 && !error && (
@@ -578,7 +776,9 @@ export default function OutfitRecommendationsScreen() {
             isFavorite={favoriteOutfitIds.includes(outfit.id)}
             onToggleFavorite={() => void toggleFavoriteOutfit(outfit.id)}
             onSchedule={() => void handlePlanOutfit(outfit)}
+            onFeedback={(rating) => void handleFeedback(outfit.id, rating)}
             isScheduling={planningOutfitId === outfit.id}
+            isSubmittingFeedback={feedbackOutfitId === outfit.id}
           />
         ))}
       </ScrollView>
@@ -638,6 +838,15 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 16, fontWeight: "800" },
   sectionHint: { fontSize: 12, lineHeight: 18 },
+  requestInput: {
+    minHeight: 76,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: 13,
+    textAlignVertical: "top",
+  },
   chipRow: { gap: spacing.sm, paddingVertical: 4 },
   choiceChip: {
     paddingHorizontal: 15,
@@ -670,6 +879,7 @@ const styles = StyleSheet.create({
 
   errorBox: { padding: spacing.md, borderRadius: radius.md, borderWidth: 1 },
   errorText: { fontSize: 13, fontWeight: "500" },
+  evaluationNote: { fontSize: 12, textAlign: "center", fontWeight: "600" },
 
   empty: {
     padding: spacing.xxl,
@@ -787,6 +997,21 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   scheduleButtonText: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" },
+  feedbackActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+  },
+  feedbackButton: {
+    minHeight: 36,
+    justifyContent: "center",
+    paddingHorizontal: spacing.sm,
+    borderWidth: 1,
+    borderRadius: radius.pill,
+  },
+  feedbackButtonText: { fontSize: 11, fontWeight: "700" },
   cardTop: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   cardLeft: { gap: 6, flex: 1 },
   favoriteButton: {
@@ -825,6 +1050,47 @@ const styles = StyleSheet.create({
   },
   explanationText: { fontSize: 14, lineHeight: 20 },
   expandHint: { fontSize: 11, textAlign: "right", marginTop: 2 },
+
+  // ── Collapsible sections ──
+  collapsible: { marginHorizontal: spacing.lg, marginBottom: spacing.sm },
+  collapsibleHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: spacing.sm,
+  },
+  collapsibleTitle: { fontSize: 13, fontWeight: "700", flex: 1 },
+  collapsibleChevron: { fontSize: 11, marginLeft: spacing.sm },
+  collapsibleBody: { paddingBottom: spacing.sm, gap: spacing.xs },
+
+  // ReAct trace
+  reactStep: { gap: 2, marginBottom: spacing.xs },
+  reactThought: { fontSize: 12, fontWeight: "600", lineHeight: 18 },
+  reactAction: { fontSize: 11, lineHeight: 16, fontFamily: "monospace" },
+  reactObservation: { fontSize: 11, lineHeight: 16 },
+
+  // Critic
+  criticTotal: { fontSize: 14, fontWeight: "800", marginBottom: spacing.xs },
+  criticRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginBottom: 4,
+  },
+  criticLabel: { fontSize: 11, fontWeight: "600", width: 120 },
+  criticBarBg: {
+    flex: 1,
+    height: 6,
+    borderRadius: 3,
+    overflow: "hidden",
+  },
+  criticBarFill: { height: "100%", borderRadius: 3 },
+  criticScore: { fontSize: 11, fontWeight: "700", width: 28, textAlign: "right" },
+  criticFeedback: { fontSize: 12, lineHeight: 18, marginTop: spacing.xs, fontStyle: "italic" },
+  criticIterations: { fontSize: 10, marginTop: 4 },
+
+  // Style guidelines
+  guidelineText: { fontSize: 12, lineHeight: 18 },
 });
 
 function confirmReplacePlannedOutfit(day: string): Promise<boolean> {

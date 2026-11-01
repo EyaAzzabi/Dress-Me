@@ -5,6 +5,29 @@ export interface OutfitRequest {
   weather?: string;
   season?: string;
   city?: string; // looked up via WeatherService server-side when weather isn't given directly
+  request_text?: string;
+}
+
+export type OutfitFeedback = "like" | "dislike" | "worn";
+
+export interface ReActStep {
+  thought: string;
+  action: {
+    tool: string;
+    args: Record<string, unknown>;
+  };
+  observation: {
+    tool: string;
+    result: unknown;
+  };
+}
+
+export interface CriticScores {
+  meteo: number;        // 0-5
+  occasion: number;     // 0-5
+  couleurs: number;     // 0-5
+  completude: number;   // 0-5
+  fraicheur: number;    // 0-5
 }
 
 export interface Outfit {
@@ -13,6 +36,18 @@ export interface Outfit {
   occasion: string | null;
   relevance_score: number | null;
   explanation: string | null;
+  feedback: OutfitFeedback | null;
+  // New agentic fields (optional — absent from DB-stored outfits fetched via GET /outfits)
+  critic_score?: {
+    scores: CriticScores;
+    total: number;
+    approved: boolean;
+    feedback: string;
+  };
+  critic_feedback?: string | null;
+  critic_iterations?: number;
+  react_trace?: ReActStep[];
+  style_guidelines_used?: string[];
 }
 
 export interface OutfitRecommendationResult {
@@ -22,6 +57,7 @@ export interface OutfitRecommendationResult {
     season: string | null;
   };
   outfits: Outfit[];
+  evaluation?: Record<string, number>;
 }
 
 export function recommendOutfits(payload: OutfitRequest) {
@@ -32,6 +68,12 @@ export function recommendOutfits(payload: OutfitRequest) {
 
 export function listOutfits() {
   return apiClient.get<Outfit[]>("/recommendations/outfits").then((r) => r.data);
+}
+
+export function feedbackOutfit(outfitId: string, rating: OutfitFeedback | null) {
+  return apiClient
+    .put<Outfit>(`/recommendations/outfits/${outfitId}/feedback`, { rating })
+    .then((r) => r.data);
 }
 
 export interface CatalogAlternative {

@@ -3,6 +3,14 @@ import httpx
 from app.core.config import get_settings
 
 
+CITY_COORDS = {
+    "Tunis":  {"lat": 36.8190, "lon": 10.1658},
+    "Sousse": {"lat": 35.8333, "lon": 10.6333},
+    "Sfax":   {"lat": 34.7406, "lon": 10.7603},
+    "Djerba": {"lat": 33.8075, "lon": 10.8451},
+}
+
+
 class WeatherService:
     """Thin client for OpenWeather, used by the Context Agent."""
 
@@ -15,15 +23,15 @@ class WeatherService:
         if not self.settings.openweather_api_key:
             return None
         try:
-            response = httpx.get(
-                self.BASE_URL,
-                params={"q": city, "appid": self.settings.openweather_api_key, "units": "metric"},
-                timeout=5.0,
-            )
+            coords = CITY_COORDS.get(city)
+            if coords:
+                params = {**coords, "appid": self.settings.openweather_api_key, "units": "metric"}
+            else:
+                params = {"q": city, "appid": self.settings.openweather_api_key, "units": "metric"}
+            response = httpx.get(self.BASE_URL, params=params, timeout=5.0)
             response.raise_for_status()
             return response.json()
         except (httpx.HTTPError, httpx.HTTPStatusError):
-            # Fallback: return estimated weather based on season and location
             return self._get_fallback_weather(city)
 
     def _get_fallback_weather(self, city: str) -> dict:

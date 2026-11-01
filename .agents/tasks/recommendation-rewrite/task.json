@@ -1,0 +1,7 @@
+{
+  "task_id": "task-recommendation-rewrite",
+  "task_description": "Réécriture complète du RecommendationAgent de DressMe : LangGraph StateGraph avec boucle ReAct, CriticAgent LLM-as-a-Judge (5 critères × 5 pts), StyleRAG TF-IDF sur 20 règles de style hardcodées, 6 nouveaux outils Pydantic. Frontend étendu avec 3 sections collapsibles (trace ReAct, grille Critic, guidelines RAG).",
+  "status": "pending",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}

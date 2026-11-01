@@ -4,7 +4,6 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.agents.llm_agent import LLMAgent
 from app.agents.context_agent import ContextAgent
 from app.agents.extraction_agent import ExtractionAgent
 from app.agents.llm_agent import LLMAgent
@@ -12,6 +11,7 @@ from app.agents.metadata_agent import MetadataAgent
 from app.agents.packing_agent import PackingAgent
 from app.agents.purchase_agent import PurchaseAgent
 from app.agents.recommendation_agent import RecommendationAgent
+from app.agents.recommendation_evaluation import feedback_alignment_at_k
 from app.agents.style_profile_agent import StyleProfileAgent
 from app.agents.vision_agent import VisionAgent
 from app.agents.wardrobe_ingestion_agent import WardrobeIngestionAgent
@@ -19,6 +19,7 @@ from app.core.config import get_settings
 from app.db import vector_store
 from app.ml import clothing_gate, ranking_model
 from app.models.outfit import Outfit
+from app.models.recommendation_feedback import RecommendationFeedback
 from app.models.packing_list import PackingList
 from app.models.scheduled_outfit import ScheduledOutfit
 from app.rag import context_retrieval
@@ -57,10 +58,31 @@ class AgentOrchestrator:
         weather: str | None = None,
         season: str | None = None,
         city: str | None = None,
+        request_text: str | None = None,
     ) -> dict[str, Any]:
-        context = self.context_agent.run(occasion=occasion, weather=weather, season=season, city=city)
+        parsed_occasion = occasion
+        if request_text and request_text.strip():
+            parsed_occasion = (
+                f"{occasion}. {request_text.strip()}" if occasion else request_text.strip()
+            )
+        context = self.context_agent.run(
+            occasion=parsed_occasion, weather=weather, season=season, city=city
+        )
         style_profile = self.style_profile_agent.run(user_id=user_id, include_narrative=False)
         usage = self.metadata_agent.usage_history(user_id=user_id)
+        feedback_preferences = [
+            {"item_ids": feedback.outfit.item_ids, "rating": feedback.rating}
+            for feedback in (
+                self.db.query(RecommendationFeedback)
+                .join(Outfit, RecommendationFeedback.outfit_id == Outfit.id)
+                .filter(
+                    RecommendationFeedback.owner_id == user_id,
+                    Outfit.owner_id == user_id,
+                    RecommendationFeedback.rating.in_(("like", "dislike")),
+                )
+                .all()
+            )
+        ]
 
         items_by_id = {}
         # Compute the shared context vector and the RAG references ONCE, before the
@@ -81,10 +103,12 @@ class AgentOrchestrator:
             items_by_id.update({item.id: item for item in items})
             return self.recommendation_agent.run(
                 wardrobe_items=items, occasion=context["occasion"],
+                request_text=request_text,
                 favorite_styles=style_profile["favorite_styles"], usage=usage,
                 season=context.get("season"), temperature=context.get("temperature"),
                 weather=context.get("weather"), occasion_category=context.get("occasion_category"),
                 formality=context.get("formality"), references=references, ctx_vec=ctx_vec,
+                feedback_preferences=feedback_preferences,
                 # No llm_agent here on purpose: outfit explanations come from the grounded,
                 # cached llm_agent.run(task="outfit") below. Passing it in as well would make a
                 # second LLM call per outfit and feed LLM text back in as the "deterministic" fact.
@@ -99,13 +123,16 @@ class AgentOrchestrator:
         if not generated["outfits"] and context["season"]:
             generated = generate(self.metadata_agent.run(user_id=user_id)["items"])
 
-        # Generating the same wardrobe twice shouldn't insert duplicate Outfit rows —
-        # reuse the existing one (by its exact set of items) instead of re-saving it.
-        existing_by_items = {
-            frozenset(o.item_ids): o
-            for o in self.db.query(Outfit).filter(Outfit.owner_id == user_id).all()
+        # Load existing saved outfits keyed by item-set so we can reuse the same DB
+        # row (and hence the same Outfit.id) when the same items are recommended again.
+        # This preserves outfit identity across calls (required by the reuse contract).
+        old_outfits = self.db.query(Outfit).filter(Outfit.owner_id == user_id).all()
+        persisted_by_items: dict = {
+            frozenset(o.item_ids): o for o in old_outfits
         }
 
+        # Track item-sets within this batch to detect duplicates and collect new rows.
+        seen_item_sets: set = set()
         result_outfits = []
         new_outfits = []
         for candidate in generated["outfits"]:
@@ -124,31 +151,46 @@ class AgentOrchestrator:
                 task="outfit", context=facts, cache_scope=str(user_id),
                 instruction="Explique les pièces proposées sans changer le classement.",
             )["explanation"] or candidate["explanation"]
-            existing = existing_by_items.get(item_set)
+
+            # Deduplicate within this batch first.
+            if item_set in seen_item_sets:
+                continue
+            seen_item_sets.add(item_set)
+
+            existing = persisted_by_items.get(item_set)
             if existing is not None:
-                # Reused identity, current context and usage-based scores.
+                # Reused identity — update context-dependent fields in place.
                 existing.occasion = context["occasion"]
                 existing.relevance_score = candidate["relevance_score"]
                 existing.explanation = explanation
                 result_outfits.append(existing)
-                continue
-            outfit = Outfit(
-                owner_id=user_id,
-                item_ids=candidate["item_ids"],
-                occasion=context["occasion"],
-                relevance_score=candidate["relevance_score"],
-                explanation=explanation,
-            )
-            new_outfits.append(outfit)
-            result_outfits.append(outfit)
-            existing_by_items[item_set] = outfit  # guards against duplicates within this same batch
+            else:
+                outfit = Outfit(
+                    owner_id=user_id,
+                    item_ids=candidate["item_ids"],
+                    occasion=context["occasion"],
+                    relevance_score=candidate["relevance_score"],
+                    explanation=explanation,
+                )
+                new_outfits.append(outfit)
+                result_outfits.append(outfit)
+
+        # Delete persisted outfits that are no longer recommended.
+        for item_set, old in persisted_by_items.items():
+            if item_set not in seen_item_sets:
+                self.db.delete(old)
 
         self.db.add_all(new_outfits)
         self.db.commit()
         for outfit in new_outfits:
             self.db.refresh(outfit)
 
-        return {"context": context, "outfits": result_outfits}
+        evaluation = {}
+        if feedback_preferences:
+            evaluation["feedback_alignment_at_k"] = feedback_alignment_at_k(
+                generated["outfits"], feedback_preferences
+            )
+        return {"context": context, "outfits": result_outfits, "evaluation": evaluation}
 
     def plan_trip(
         self,

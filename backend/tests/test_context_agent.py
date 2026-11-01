@@ -75,6 +75,13 @@ def test_free_text_occasion_is_parsed_to_a_category_via_rules(monkeypatch):
     assert result["occasion"] == "je vais a un mariage ce soir"
 
 
+def test_free_text_dinner_request_is_parsed_as_evening():
+    result = ContextAgent().run(occasion="Je vais dîner au restaurant ce soir")
+
+    assert result["occasion_category"] == "soiree"
+    assert result["formality"] == 3
+
+
 def test_temperature_and_weather_band_are_present_when_lookup_succeeds(monkeypatch):
     fake_data = {"weather": [{"description": "clear sky"}], "main": {"temp": 28.0}}
     monkeypatch.setattr(

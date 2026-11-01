@@ -167,9 +167,16 @@ class LLMAgent(BaseAgent):
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        
+        # Build headers - Ollama doesn't need Authorization
+        headers = {}
+        api_key = self.settings.llm_api_key
+        if self.settings.llm_provider not in {"ollama", "llama"} and api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        
         response = httpx.post(
             f"{base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {self.settings.llm_api_key}"},
+            headers=headers,
             json=payload,
             timeout=timeout,
         )
@@ -199,7 +206,7 @@ class LLMAgent(BaseAgent):
             return {"explanation": None}
         try:
             base, model = self._resolve_provider()
-            key = self.settings.llm_api_key
+            key = getattr(self.settings, "active_llm_api_key", self.settings.llm_api_key)
             if not key and self.settings.llm_provider not in {"ollama", "llama"}:
                 raise ValueError("Missing LLM_API_KEY")
             if task == "assistant":

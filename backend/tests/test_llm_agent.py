@@ -58,6 +58,34 @@ def test_no_provider_returns_none_without_network(monkeypatch):
     post.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    ("provider", "expected"),
+    [("openai", "openai-test-key"), ("groq", "groq-test-key")],
+)
+def test_provider_specific_api_key_is_selected(provider, expected):
+    settings = Settings(
+        _env_file=None,
+        llm_provider=provider,
+        llm_api_key="shared-test-key",
+        openai_api_key="openai-test-key",
+        groq_api_key="groq-test-key",
+    )
+
+    assert settings.active_llm_api_key == expected
+
+
+def test_shared_api_key_remains_fallback_for_other_providers():
+    settings = Settings(
+        _env_file=None,
+        llm_provider="mistral",
+        llm_api_key="shared-test-key",
+        openai_api_key="openai-test-key",
+        groq_api_key="groq-test-key",
+    )
+
+    assert settings.active_llm_api_key == "shared-test-key"
+
+
 @pytest.mark.parametrize("provider,host,model", [
     ("groq", "https://api.groq.com/openai/v1", "openai/gpt-oss-20b"),
     ("gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.8-flash"),

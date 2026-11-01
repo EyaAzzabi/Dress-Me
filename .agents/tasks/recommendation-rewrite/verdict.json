@@ -1,0 +1,7 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    "Missing `import json` at module level in recommendation_agent.py — `_node_compose_outfit` calls `json.loads(raw_text[start:end])` but only `import json as _json` exists inside `_item_to_dict`. This raises `NameError` on every LLM compose invocation, silently falling back to deterministic selection and permanently disabling the LLM composition path. Fix: add `import json` at the top of the file."
+  ],
+  "reviewDoc": ".agents/tasks/recommendation-rewrite/2026-10-27-171750-review.md"
+}

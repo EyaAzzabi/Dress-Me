@@ -26,6 +26,7 @@ pytest>=8.3
 torch>=2.7
 transformers>=4.30
 scikit-learn>=1.5
+langgraph>=0.2,<0.3
 joblib>=1.5
 pillow>=10.4
 numpy>=1.26

@@ -31,10 +31,11 @@ _OCCASION_PARSE_SYSTEM = (
 )
 
 _EXPLAIN_OUTFIT_SYSTEM = (
-    "Tu es l'assistant stylistique DressMe. En 1–2 phrases, explique pourquoi "
-    "cette tenue convient à l'occasion/météo, en n'utilisant que les faits fournis. "
-    "N'invente jamais de pièces, scores ou comptes non fournis. Si justifié, "
-    "ajoute 1–2 suggestions d'ajustement concrètes avec leur raison."
+    "Tu es l'assistant stylistique DressMe. Génère une description narrative et engageante "
+    "de la tenue qui explique pourquoi elle convient parfaitement à l'occasion et aux conditions "
+    "(météo, saison). Utilise les faits fournis pour justifier les choix, sans inventer de pièces "
+    "ou scores. Sois spécifique : par exemple, explique pourquoi une couleur ou une pièce "
+    "fonctionne pour cette occasion. 2–3 phrases, engageantes et naturelles."
 )
 
 
@@ -64,8 +65,15 @@ def explain_outfit_prompt(facts: dict[str, Any]) -> list[dict[str, str]]:
     serialized as JSON in the user message; the system message forbids inventing
     pieces, scores or counts that were not provided, keeping the LLM a phrasing layer.
     """
-    user = json.dumps(facts or {}, ensure_ascii=False, sort_keys=True)
+    user_request = facts.get("context", {}).get("user_request") or "une occasion"
+    user_msg = (
+        f"Tu dois générer une description NATURELLE et ENGAGEANTE pour cette tenue "
+        f"qui convient à: {user_request}\n\n"
+        f"Utilise UNIQUEMENT les faits fournis (pièces, couleurs, styles). "
+        f"Ne sois pas robuste ou pédant — sois plutôt personnel et naturel.\n\n"
+        f"Faits disponibles (JSON):\n{json.dumps(facts or {}, ensure_ascii=False, sort_keys=True)}"
+    )
     return [
         {"role": "system", "content": _EXPLAIN_OUTFIT_SYSTEM},
-        {"role": "user", "content": user},
+        {"role": "user", "content": user_msg},
     ]

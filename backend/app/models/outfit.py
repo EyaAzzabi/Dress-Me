@@ -40,3 +40,10 @@ class Outfit(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     owner = relationship("User", back_populates="outfits")
+    feedback_entry = relationship(
+        "RecommendationFeedback", back_populates="outfit", uselist=False, cascade="all, delete-orphan"
+    )
+
+    @property
+    def feedback(self) -> str | None:
+        return self.feedback_entry.rating if self.feedback_entry is not None else None

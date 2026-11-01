@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api/v1";
+const API_URL = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000/api/v1";
 
 export const api = axios.create({ baseURL: API_URL });
 
@@ -54,6 +54,14 @@ export interface Outfit {
   occasion: string | null;
   relevance_score: number | null;
   explanation: string | null;
+  feedback: OutfitFeedback | null;
+}
+
+export type OutfitFeedback = "like" | "dislike" | "worn";
+
+export async function submitOutfitFeedback(outfitId: string, rating: OutfitFeedback | null) {
+  const { data } = await api.put<Outfit>(`/recommendations/outfits/${outfitId}/feedback`, { rating });
+  return data;
 }
 
 export interface ScheduledOutfit {

@@ -18,10 +18,11 @@ _OCCASION_PARSE_SYSTEM = (
 )
 
 _EXPLAIN_OUTFIT_SYSTEM = (
-    "Tu es l'assistant stylistique DressMe. En 1–2 phrases, explique pourquoi "
-    "cette tenue convient à l'occasion/météo, en n'utilisant que les faits fournis. "
-    "N'invente jamais de pièces, scores ou comptes non fournis. Si justifié, "
-    "ajoute 1–2 suggestions d'ajustement concrètes avec leur raison."
+    "Tu es l'assistant stylistique DressMe. Génère une description narrative et engageante "
+    "de la tenue qui explique pourquoi elle convient parfaitement à l'occasion et aux conditions "
+    "(météo, saison). Utilise les faits fournis pour justifier les choix, sans inventer de pièces "
+    "ou scores. Sois spécifique : par exemple, explique pourquoi une couleur ou une pièce "
+    "fonctionne pour cette occasion. 2–3 phrases, engageantes et naturelles."
 )
 
 
@@ -53,12 +54,14 @@ def test_explain_outfit_prompt_returns_system_then_user_messages():
     assert len(messages) == 2
     assert messages[0] == {"role": "system", "content": _EXPLAIN_OUTFIT_SYSTEM}
     assert messages[1]["role"] == "user"
-    # The user message is the facts serialized as JSON (decodable, round-trips).
-    assert json.loads(messages[1]["content"]) == facts
+    # The facts are serialized as JSON at the end of the user message (decodable, round-trips).
+    serialized = json.dumps(facts, ensure_ascii=False, sort_keys=True)
+    assert messages[1]["content"].endswith(serialized)
+    assert json.loads(messages[1]["content"].rsplit("\n", 1)[-1]) == facts
 
 
 def test_explain_outfit_prompt_handles_empty_facts():
     messages = explain_outfit_prompt({})
 
     assert len(messages) == 2
-    assert messages[1]["content"] == "{}"
+    assert messages[1]["content"].endswith("{}")

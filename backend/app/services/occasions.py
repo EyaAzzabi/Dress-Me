@@ -79,7 +79,10 @@ _OCCASION_RULES = (
         "tenue de cérémonie",
     ),
     (
-        ("soirée", "soiree", "party", "sortie", "disco", "boîte", "boite", "club"),
+        (
+            "soirée", "soiree", "party", "sortie", "disco", "boîte", "boite",
+            "club", "dîner", "diner", "restaurant", "dinner",
+        ),
         "soiree",
         3,
         "chic",

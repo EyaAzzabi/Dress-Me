@@ -2,6 +2,7 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "reac
 import {
   api,
   ClothingItem,
+  OutfitFeedback,
   ItemUsage,
   CurrentUser,
   getApiError,
@@ -25,6 +26,7 @@ import {
   WardrobeAnalysisResponse,
   parseLowCategoryConfidence,
   LowCategoryConfidence,
+  submitOutfitFeedback,
 } from "./api";
 import "./styles.css";
 import LlmAssistant from "./LlmAssistant";
@@ -609,13 +611,38 @@ export default function App() {
     setError("");
     try {
       const form = new FormData(event.currentTarget);
-      const { data } = await api.post<{ outfits: Outfit[]; context: Record<string, string | null> }>("/recommendations/outfits", {
+      const { data } = await api.post<{
+        outfits: Outfit[];
+        context: Record<string, string | null>;
+        evaluation?: Record<string, number>;
+      }>("/recommendations/outfits", {
         occasion: String(form.get("occasion") || "") || undefined,
+        request_text: String(form.get("request_text") || "").trim() || undefined,
         city: String(form.get("city") || "") || undefined,
         season: String(form.get("season") || "") || undefined,
       });
       setOutfits(data.outfits);
-      setNotice(`${data.outfits.length} idée${data.outfits.length === 1 ? "" : "s"} de tenue proposée${data.outfits.length === 1 ? "" : "s"}.`);
+      const alignment = data.evaluation?.feedback_alignment_at_k;
+      const evaluationText = alignment == null
+        ? ""
+        : ` Alignement avec tes retours précédents : ${alignment >= 0 ? "+" : ""}${alignment.toFixed(2)}.`;
+      setNotice(`${data.outfits.length} idée${data.outfits.length === 1 ? "" : "s"} de tenue proposée${data.outfits.length === 1 ? "" : "s"}.${evaluationText}`);
+    } catch (cause: unknown) {
+      reportError(cause);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveOutfitFeedback(outfitId: string, rating: OutfitFeedback | null) {
+    setBusy(`outfit-feedback:${outfitId}`);
+    setError("");
+    try {
+      const updated = await submitOutfitFeedback(outfitId, rating);
+      setOutfits((current) => current.map((outfit) => outfit.id === updated.id ? updated : outfit));
+      setNotice(rating === "worn"
+        ? "Merci, cette tenue est notée comme portée et ton historique est actualisé."
+        : rating === null ? "Ton avis sur cette tenue a été retiré." : "Merci, ton avis aidera à personnaliser les prochaines idées.");
     } catch (cause: unknown) {
       reportError(cause);
     } finally {
@@ -751,6 +778,12 @@ export default function App() {
   const [tryOnResult, setTryOnResult] = useState("");
   const [selectedTryOnItems, setSelectedTryOnItems] = useState<string[]>([]);
 
+  // Real-time weather for topbar only
+  const [topbarWeather, setTopbarWeather] = useState({ temp: 22, icon: "🌤️", city: "Tunis" });
+  useEffect(() => {
+    api.get("/weather/Tunis").then(({ data }) => setTopbarWeather({ temp: data.temp, icon: data.icon, city: data.city })).catch(() => {});
+  }, []);
+
   function toggleTryOnItem(id: string) {
     setSelectedTryOnItems((current) =>
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
@@ -841,7 +874,7 @@ export default function App() {
           </div>
           <div className="topbar-right">
             <span className="weather-chip" title="Météo actuelle en Tunisie">
-              <span className="weather-icon">🌤️</span> Tunis · 22°C
+              <span className="weather-icon">{topbarWeather.icon}</span> {topbarWeather.city} · {topbarWeather.temp}°C
             </span>
             <button
               type="button"
@@ -931,7 +964,7 @@ export default function App() {
             />
           )}
           {ingestionReview && <WardrobeIngestionModal review={ingestionReview} busy={busy === "wardrobe-upload"} onConfirm={confirmIngestion} onCancel={() => setIngestionReview(null)} />}
-          {screen === "outfits" && <OutfitsView items={items} itemsById={itemsById} outfits={outfits} favorites={outfitFavorites} scheduled={scheduled} today={today} busy={busy} onGenerate={generateLooks} onToggleFavorite={(id) => toggleFavorite(id, "outfit")} onSchedule={scheduleOutfit} />}
+          {screen === "outfits" && <OutfitsView items={items} itemsById={itemsById} outfits={outfits} favorites={outfitFavorites} scheduled={scheduled} today={today} busy={busy} onGenerate={generateLooks} onToggleFavorite={(id) => toggleFavorite(id, "outfit")} onSchedule={scheduleOutfit} onFeedback={saveOutfitFeedback} />}
           {screen === "calendar" && <CalendarView anchor={monthAnchor} onMonthChange={setMonthAnchor} scheduled={scheduled} items={items} loading={loading} onSave={saveCalendarOutfit} onRemove={removeCalendarOutfit}  onRender={renderCalendarOutfit} />}
           {screen === "profile" && <ProfileView user={user} profile={profile} busy={busy} onAvatar={uploadAvatar} onNavigate={navigate} />}
           {screen === "assistant" && <LlmAssistant onNavigate={navigate} />}
@@ -1598,7 +1631,7 @@ function WardrobeView({ items, favorites, busy, usage, categoryPrompt, onConfirm
   </>;
 }
 
-function OutfitsView({ items, itemsById, outfits, favorites, scheduled, today, busy, onGenerate, onToggleFavorite, onSchedule }: {
+function OutfitsView({ items, itemsById, outfits, favorites, scheduled, today, busy, onGenerate, onToggleFavorite, onSchedule, onFeedback }: {
   items: ClothingItem[];
   itemsById: Map<string, ClothingItem>;
   outfits: Outfit[];
@@ -1609,11 +1642,26 @@ function OutfitsView({ items, itemsById, outfits, favorites, scheduled, today, b
   onGenerate: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onToggleFavorite: (id: string) => void;
   onSchedule: (outfit: Outfit, date: string) => Promise<void>;
+  onFeedback: (outfitId: string, rating: OutfitFeedback | null) => Promise<void>;
 }) {
   const [showFavorites, setShowFavorites] = useState(false);
   const [selectedOccasion, setSelectedOccasion] = useState("");
   const [selectedCity, setSelectedCity] = useState("Tunis");
   const [planDates, setPlanDates] = useState<Record<string, string>>({});
+  const [cityWeathers, setCityWeathers] = useState<Record<string, { temp: number; icon: string }>>({
+    Tunis:  { temp: 22, icon: "🌤️" },
+    Sousse: { temp: 24, icon: "☀️" },
+    Sfax:   { temp: 21, icon: "⛅" },
+    Djerba: { temp: 25, icon: "🌴" },
+  });
+
+  useEffect(() => {
+    ["Tunis", "Sousse", "Sfax", "Djerba"].forEach((city) => {
+      api.get(`/weather/${city}`)
+        .then(({ data }) => setCityWeathers((prev) => ({ ...prev, [city]: { temp: data.temp, icon: data.icon } })))
+        .catch(() => {});
+    });
+  }, []);
 
   const OCCASION_DATA = [
     { id: "", label: "Toutes", icon: "✨" },
@@ -1625,17 +1673,23 @@ function OutfitsView({ items, itemsById, outfits, favorites, scheduled, today, b
   ];
 
   const CITY_DATA = [
-    { name: "Tunis", temp: "22°C", icon: "🌤️" },
-    { name: "Sousse", temp: "24°C", icon: "☀️" },
-    { name: "Sfax", temp: "21°C", icon: "⛅" },
-    { name: "Djerba", temp: "25°C", icon: "🌴" },
+    { name: "Tunis",  temp: `${cityWeathers["Tunis"]?.temp ?? 22}°C`,  icon: cityWeathers["Tunis"]?.icon  ?? "🌤️" },
+    { name: "Sousse", temp: `${cityWeathers["Sousse"]?.temp ?? 24}°C`, icon: cityWeathers["Sousse"]?.icon ?? "☀️" },
+    { name: "Sfax",   temp: `${cityWeathers["Sfax"]?.temp ?? 21}°C`,   icon: cityWeathers["Sfax"]?.icon   ?? "⛅" },
+    { name: "Djerba", temp: `${cityWeathers["Djerba"]?.temp ?? 25}°C`, icon: cityWeathers["Djerba"]?.icon ?? "🌴" },
   ];
 
   const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
 
   const filtered = outfits.filter((outfit) => {
     if (showFavorites && !favorites.includes(outfit.id)) return false;
-    if (selectedOccasion && outfit.occasion && outfit.occasion.toLowerCase() !== selectedOccasion.toLowerCase()) return false;
+    if (selectedOccasion && outfit.occasion) {
+      // Normalize: check if the outfit occasion starts with or contains the selected occasion
+      const occ = outfit.occasion.toLowerCase();
+      const sel = selectedOccasion.toLowerCase();
+      if (occ !== sel && !occ.startsWith(sel) && !occ.includes(sel)) return false;
+    }
+    // If selectedOccasion is set but outfit.occasion is not in known list, still show it
     return true;
   });
 
@@ -1669,6 +1723,18 @@ function OutfitsView({ items, itemsById, outfits, favorites, scheduled, today, b
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="form-section-group">
+        <label className="section-mini-label" htmlFor="outfit-request-text">Une envie précise ? (facultatif)</label>
+        <textarea
+          id="outfit-request-text"
+          name="request_text"
+          className="request-textarea"
+          maxLength={500}
+          placeholder="Ex. Je vais dîner au restaurant après le travail"
+        />
+        <p className="inline-hint">Décris le contexte en langage courant. Les pièces proposées restent limitées à ton dressing.</p>
       </div>
 
       {/* City & Weather Chips */}
@@ -1772,6 +1838,29 @@ function OutfitsView({ items, itemsById, outfits, favorites, scheduled, today, b
                   <p>{outfit.explanation}</p>
                 </details>
               )}
+
+              <div className="outfit-feedback-actions" aria-label="Donner ton avis sur cette tenue">
+                {([
+                  ["like", "👍 J’aime"],
+                  ["dislike", "👎 Pas pour moi"],
+                  ["worn", "✓ Déjà portée"],
+                ] as const).map(([rating, label]) => {
+                  const isBusy = busy === `outfit-feedback:${outfit.id}`;
+                  const active = outfit.feedback === rating;
+                  return (
+                    <button
+                      key={rating}
+                      type="button"
+                      className={`outfit-feedback-button${active ? " is-selected" : ""}`}
+                      disabled={isBusy}
+                      aria-pressed={active}
+                      onClick={() => void onFeedback(outfit.id, active ? null : rating)}
+                    >
+                      {isBusy ? "Enregistrement…" : label}
+                    </button>
+                  );
+                })}
+              </div>
 
               {/* Scheduling Quick Actions */}
               <div className="schedule-quick-container">

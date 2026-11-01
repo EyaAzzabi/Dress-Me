@@ -1,0 +1,7 @@
+{
+  "task_id": "task-rlhf-upgrade",
+  "task_description": "Add RLHF + Deep Learning modules to the DressMe RecommendationAgent: an OutfitCompatibilityTransformer (PyTorch Transformer Encoder), a PreferenceRewardModel (Bradley-Terry pairwise loss), a preference_dataset builder from DB feedback, and wiring them into _node_finalize and run() with graceful CPU-only fallbacks.",
+  "status": "pending",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}

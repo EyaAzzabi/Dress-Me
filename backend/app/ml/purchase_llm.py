@@ -191,9 +191,10 @@ def _generate_api(messages: list[dict]) -> str:
     model = settings.llm_model or defaults[1]
     if not base_url or not model:
         return ""
+    api_key = getattr(settings, "active_llm_api_key", settings.llm_api_key)
     response = httpx.post(
         f"{base_url.rstrip('/')}/chat/completions",
-        headers={"Authorization": f"Bearer {settings.llm_api_key or 'ollama'}"},
+        headers={"Authorization": f"Bearer {api_key or 'ollama'}"},
         json={"model": model, "messages": messages, "temperature": 0.2, "max_tokens": 200},
         timeout=30.0,
     )

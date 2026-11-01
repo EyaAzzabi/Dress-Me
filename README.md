@@ -32,7 +32,7 @@ under `backend/app/agents/`, coordinated by `AgentOrchestrator`:
 | **MetadataAgent** | The digital wardrobe: add / correct / remove, search and filters, usage history (calendar + "worn" log). |
 | **StyleProfileAgent** | Learns the user's favorite styles/colors from the wardrobe. |
 | **ContextAgent** | Occasion / weather (OpenWeather) / season. |
-| **RecommendationAgent** | Builds outfits scored by a compatibility model trained on Polyvore; penalizes recently worn pieces. |
+| **RecommendationAgent** | Builds outfits scored by a compatibility model trained on Polyvore; penalizes recently worn pieces and learns from per-outfit likes/dislikes. Free-text occasion requests are parsed and checked against wardrobe/context constraints. |
 | **PackingAgent** | Suitcase list from trip length, type and season; always includes outfits already planned in the calendar. |
 | **PurchaseAgent** | Checks a new item against the wardrobe (needs Pinecone). |
 | **TryOnAgent** | Virtual try-on (free Hugging Face Space, or Replicate). Used by the Try-on screen and the calendar's avatar render. |

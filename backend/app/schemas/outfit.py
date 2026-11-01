@@ -10,6 +10,7 @@ class OutfitRequest(BaseModel):
     weather: str | None = None
     season: str | None = None
     city: str | None = None  # looked up via WeatherService when weather isn't given directly
+    request_text: str | None = Field(default=None, max_length=500)
 
 
 class OutfitRead(BaseModel):
@@ -18,6 +19,7 @@ class OutfitRead(BaseModel):
     occasion: str | None = None
     relevance_score: float | None = None
     explanation: str | None = None
+    feedback: Literal["like", "dislike", "worn"] | None = None
 
     class Config:
         from_attributes = True
@@ -26,6 +28,11 @@ class OutfitRead(BaseModel):
 class OutfitRecommendationResult(BaseModel):
     context: dict
     outfits: list[OutfitRead]
+    evaluation: dict[str, float] = Field(default_factory=dict)
+
+
+class OutfitFeedbackRequest(BaseModel):
+    rating: Literal["like", "dislike", "worn"] | None
 
 
 GarmentCategory = Literal["haut", "bas", "robe", "veste", "chaussures", "sac", "accessoire"]

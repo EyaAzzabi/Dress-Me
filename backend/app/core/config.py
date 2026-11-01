@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     # Vision Agent's optional OpenAI vision second opinion (app/ml/vision_llm.py). Off by default:
     # it sends the user's photo to OpenAI and costs a little per call.
     openai_api_key: str | None = Field(default=None, repr=False)
+    groq_api_key: str | None = Field(default=None, repr=False)
     vision_llm_enabled: bool = False
     vision_llm_model: str = "gpt-4o-mini"
     vision_llm_prompt_version: str = "v1"  # key of app/ml/vision_llm.py PROMPTS
@@ -62,6 +63,11 @@ class Settings(BaseSettings):
     llm_failure_ttl_seconds: float = Field(default=15, ge=0, le=300)
     llm_cache_max_entries: int = Field(default=512, ge=1, le=10000)
 
+    # MCP (Model Context Protocol) integration for RecommendationAgent tools.
+    # Disabled by default; set to True and configure mcp_server_urls to enable.
+    mcp_enabled: bool = False
+    mcp_server_urls: str = "{}"  # JSON string: {"get_weather": "http://...", ...}
+
     # RecommendationAgent enrichment kill-switches (3 axes: fine-tuning ranking,
     # contextual RAG, prompt engineering + LLM). Default ON so the enriched path is
     # used when artifacts/data are present; flip to false to force the exact legacy
@@ -69,6 +75,15 @@ class Settings(BaseSettings):
     # The test conftest forces both off so existing tests run the fallback path.
     ranking_enabled: bool = True
     contextual_rag_enabled: bool = True
+
+    @property
+    def active_llm_api_key(self) -> str | None:
+        """Use a provider-specific key when available, with the shared key as fallback."""
+        if self.llm_provider == "openai" and self.openai_api_key:
+            return self.openai_api_key
+        if self.llm_provider == "groq" and self.groq_api_key:
+            return self.groq_api_key
+        return self.llm_api_key
 
     # Virtual try-on (TryOnAgent) via Replicate's hosted API — no local GPU needed.
     # replicate_tryon_model_version has no safe hardcoded default: Replicate model
@@ -97,6 +112,11 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+
+    @property
+    def mcp_server_urls_dict(self) -> dict[str, str]:
+        import json
+        return json.loads(self.mcp_server_urls or "{}")
 
 
 @lru_cache
