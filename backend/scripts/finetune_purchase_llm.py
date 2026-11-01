@@ -50,7 +50,7 @@ def main() -> None:
         output_dir=str(ADAPTER_DIR / "runs"),
         per_device_train_batch_size=2,
         gradient_accumulation_steps=4,
-        num_train_epochs=3,
+        num_train_epochs=10,
         learning_rate=2e-4,
         logging_steps=10,
         save_strategy="no",

@@ -53,8 +53,8 @@ _PROVIDER_DEFAULTS = {
     "llama": (None, None),
 }
 
-_TOOL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
-_FINAL_RE = re.compile(r"<final>\s*(\{.*?\})\s*</final>", re.S)
+_TOOL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*(?:</tool_call>)?", re.S)
+_FINAL_RE = re.compile(r"<final>\s*(\{.*?\})\s*(?:</final>)?", re.S)
 
 
 def parse_action(text: str) -> dict[str, Any] | None:
@@ -154,8 +154,21 @@ def _model_name() -> str | None:
     return settings.llm_model or _PROVIDER_DEFAULTS.get(settings.llm_provider, (None, None))[1]
 
 
+@lru_cache
+def _peft_available() -> bool:
+    try:
+        import peft  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def _adapter_ready() -> bool:
-    return (ADAPTER_DIR / "adapter_config.json").exists()
+    # The adapter files are committed to the repo, so they're present on every
+    # checkout; peft (requirements-purchase-llm.txt) is optional and only needed
+    # to actually run local inference with them — without it, fall back to the
+    # API path instead of crashing.
+    return (ADAPTER_DIR / "adapter_config.json").exists() and _peft_available()
 
 
 @lru_cache
@@ -180,7 +193,7 @@ def _generate_local(messages: list[dict]) -> str:
     prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     inputs = tokenizer(prompt, return_tensors="pt")
     with torch.no_grad():
-        output = model.generate(**inputs, max_new_tokens=160, temperature=0.2, do_sample=False)
+        output = model.generate(**inputs, max_new_tokens=256, temperature=0.2, do_sample=False)
     return tokenizer.decode(output[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
 
 
