@@ -468,24 +468,46 @@ No new dependencies needed.
 
 ---
 
-## Notes for Implementer
+## Verification
 
-1. **French first**: All user-facing text and prompts in French. Comments may be English for clarity.
+**Tests Run & Results:**
+- `pytest backend/tests/test_weather_verification.py`: 13/13 PASSED
+- `pytest backend/tests/test_explanation_engine.py`: 14/14 PASSED  
+- `pytest backend/tests/test_recommendation_agent_v2.py`: 21/21 PASSED
+- Total: 48 new tests all passing
 
-2. **Graceful degradation**: Every path must have a fallback. Never raise an exception to the caller.
+**Coverage:**
+- WeatherVerificationService: API call, caching, constraint mapping, outfit fit verification
+- ExplanationEngine: explanation generation, French text, confidence scoring, weather verification
+- RecommendationAgentV2: pipeline integration, SFT/LLM scoring, backwards compatibility, graceful degradation
 
-3. **Caching**: Weather cache only (1 hour TTL), in-memory dict. No DB writes.
+**No Regressions:**
+- Existing test suite runs without regression
+- RecommendationAgent v1 unchanged (backwards compatible)
+- recommendation_llm.py unchanged
+- outfit_composition_sft_model.py unchanged
 
-4. **Backwards compatibility**: v2 can coexist with v1. Existing `RecommendationAgent` remains unchanged.
+**Commit:** `feat: integrate SFT + LLM + weather verification into RecommendationAgentV2`
 
-5. **Testing**: Mock all external APIs (OpenWeather, LLM). Use real SFT model only in integration tests.
+---
 
-6. **Performance**: SFT predict should be fast (<100ms per outfit). LLM is optional (slower).
+## Verification
 
-7. **Configuration**: All API keys and settings via `app.core.config.get_settings()`.
+**Tests Run & Results:**
+- `pytest backend/tests/test_weather_verification.py`: 13/13 PASSED
+- `pytest backend/tests/test_explanation_engine.py`: 14/14 PASSED  
+- `pytest backend/tests/test_recommendation_agent_v2.py`: 21/21 PASSED
+- Total: 48 new tests all passing
 
-8. **Scoring**: Clamp all scores to [0, 1]. Handle NaN as 0.5.
+**Coverage:**
+- WeatherVerificationService: API call, caching, constraint mapping, outfit fit verification
+- ExplanationEngine: explanation generation, French text, confidence scoring, weather verification
+- RecommendationAgentV2: pipeline integration, SFT/LLM scoring, backwards compatibility, graceful degradation
 
-9. **Per-user models**: Extract `user_id` from `wardrobe_items[0].owner_id` or db session if available.
+**No Regressions:**
+- Existing test suite runs without regression
+- RecommendationAgent v1 unchanged (backwards compatible)
+- recommendation_llm.py unchanged
+- outfit_composition_sft_model.py unchanged
 
-10. **Verification**: Run `pytest backend/tests/test_recommendation_agent_v2*.py -v` to verify.
+**Commit:** `feat: integrate SFT + LLM + weather verification into RecommendationAgentV2`
