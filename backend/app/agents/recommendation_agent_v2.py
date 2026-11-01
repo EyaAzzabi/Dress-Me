@@ -21,7 +21,9 @@ import numpy as np
 
 from app.agents.base import BaseAgent
 from app.core.config import get_settings
+from app.db import vector_store
 from app.ml.explanation_engine import ExplanationEngine
+from app.ml.recommendation_llm import RecommendationToolSandbox, run_agent as llm_run_agent
 from app.services.weather_verification import WeatherVerificationService
 
 logger = logging.getLogger(__name__)
@@ -135,15 +137,22 @@ class RecommendationAgentV2(BaseAgent):
             # 6. Score with LLM validation (optional)
             llm_scores = {}
             if llm_agent:
-                llm_scores = self._score_with_llm(outfit_candidates, llm_agent, context={
-                    "occasion": occasion,
-                    "season": season,
-                    "temperature": temperature,
-                })
+                llm_scores = self._score_with_llm(
+                    outfit_candidates,
+                    llm_agent,
+                    wardrobe_items,
+                    context={
+                        "occasion": occasion,
+                        "season": season,
+                        "temperature": temperature,
+                    },
+                    weather_data=weather_data,
+                )
 
             # 7. Generate explanations
             outfits = []
-            for outfit_items in outfit_candidates:
+            for outfit_idx, outfit_items in enumerate(outfit_candidates):
+                self._current_outfit_idx = outfit_idx  # Track for LLM lookup
                 outfit_dict = self._build_outfit_dict(
                     outfit_items,
                     sft_scores,
@@ -233,9 +242,11 @@ class RecommendationAgentV2(BaseAgent):
             weather_data: Weather conditions
 
         Returns:
-            Filtered items list (never empty—falls back to all items if filtered result is empty)
+            Filtered items list. Falls back to all items only if filtering is too strict
+            AND no extreme weather mismatches were detected.
         """
         filtered = []
+        extreme_mismatch_count = 0
 
         for item in items:
             # Check season match (only filter if item has explicit season different from "all")
@@ -252,14 +263,38 @@ class RecommendationAgentV2(BaseAgent):
                 material_lower = str(material).lower()
                 # Only filter extreme mismatches
                 if temp < 5 and "lin" in material_lower:
+                    extreme_mismatch_count += 1
                     continue  # Linen way too cold
                 if temp > 30 and "laine" in material_lower:
+                    extreme_mismatch_count += 1
                     continue  # Wool way too hot
 
             filtered.append(item)
 
-        # Never return empty list—use original if filtering is too strict
-        return filtered if filtered else items
+        # Only fallback to all items if we filtered out very few items
+        # or if no extreme mismatches were detected
+        if not filtered:
+            if extreme_mismatch_count > 0:
+                # We removed items due to extreme weather, don't fallback completely
+                # Instead, be more lenient: allow some borderline cases
+                filtered = []
+                for item in items:
+                    temp = weather_data.get("temperature", 20)
+                    material = getattr(item, "material", None)
+                    if material:
+                        material_lower = str(material).lower()
+                        # Only skip the most extreme cases
+                        if temp < 0 and "lin" in material_lower:
+                            continue
+                        if temp > 35 and "laine" in material_lower:
+                            continue
+                    filtered.append(item)
+            
+            if not filtered:
+                # Last resort: use all items
+                filtered = items
+
+        return filtered
 
     def _load_sft_model(self, user_id: str) -> Any:
         """Load SFT model for user.
@@ -315,8 +350,6 @@ class RecommendationAgentV2(BaseAgent):
 
         try:
             # Fetch embeddings for items
-            from app.db import vector_store
-
             item_ids = [str(getattr(item, "id", "")) for item in items]
             embeddings_dict = vector_store.fetch_embeddings(item_ids)
 
@@ -349,6 +382,7 @@ class RecommendationAgentV2(BaseAgent):
                 threshold=0.5,
             )
 
+
             # Extract scores from result
             if result and "scores" in result:
                 predicted_ids = result.get("item_ids", [])
@@ -377,14 +411,18 @@ class RecommendationAgentV2(BaseAgent):
         self,
         outfit_candidates: list[list],
         llm_agent: Any,
+        wardrobe_items: list,
         context: dict[str, Any],
-    ) -> dict[str, float]:
+        weather_data: dict[str, Any] | None = None,
+    ) -> dict[int, float]:
         """Score outfits using LLM validation.
 
         Args:
-            outfit_candidates: List of outfit (each outfit is list of items)
+            outfit_candidates: List of outfits (each outfit is list of items)
             llm_agent: LLM agent to use
+            wardrobe_items: All wardrobe items (for sandbox context)
             context: Context dict with occasion, season, etc.
+            weather_data: Weather conditions (optional)
 
         Returns:
             Dict mapping outfit index → llm confidence score
@@ -395,30 +433,58 @@ class RecommendationAgentV2(BaseAgent):
             return scores
 
         try:
-            for idx, outfit_items in enumerate(outfit_candidates):
+            # Convert wardrobe items to dict format for sandbox
+            wardrobe_dicts = []
+            for item in wardrobe_items:
+                wardrobe_dicts.append({
+                    "id": str(getattr(item, "id", "")),
+                    "name": getattr(item, "name", ""),
+                    "category": getattr(item, "category", ""),
+                    "colors": getattr(item, "colors", []) or [],
+                    "material": getattr(item, "material", ""),
+                    "style": getattr(item, "style", ""),
+                    "season": getattr(item, "season", ""),
+                })
+
+            for outfit_idx, outfit_items in enumerate(outfit_candidates):
                 # Build task for LLM
-                item_names = [
-                    getattr(item, "name", getattr(item, "id", "")) for item in outfit_items
-                ]
+                item_dicts = []
+                for item in outfit_items:
+                    item_dicts.append({
+                        "id": str(getattr(item, "id", "")),
+                        "name": getattr(item, "name", ""),
+                        "category": getattr(item, "category", ""),
+                        "colors": getattr(item, "colors", []) or [],
+                    })
+
                 task = {
                     "type": "validate_outfit",
-                    "outfit_items": item_names,
+                    "outfit_items": item_dicts,
                     "occasion": context.get("occasion", "casual"),
                     "season": context.get("season", "spring"),
                 }
 
-                # Call LLM
+                # Create sandbox for LLM
+                sandbox = RecommendationToolSandbox(
+                    wardrobe_items=wardrobe_dicts,
+                    weather_data=weather_data or {},
+                    occasion=context.get("occasion"),
+                    season=context.get("season"),
+                )
+
+                # Call LLM using correct API
                 try:
-                    result = llm_agent.run(task=task, sandbox=None)
+                    result = llm_run_agent(task, sandbox, user_id=None)
                     if result and isinstance(result, dict):
                         # Extract confidence from LLM result
-                        confidence = result.get("confidence", 0.7)
-                        scores[idx] = float(confidence)
+                        # Parse from explanation or use default
+                        confidence = self._extract_llm_confidence(result.get("explanation", ""))
+                        scores[outfit_idx] = float(confidence)
                     else:
-                        scores[idx] = 0.7
+                        scores[outfit_idx] = 0.7
                 except Exception as e:
-                    logger.debug(f"LLM validation error for outfit {idx}: {e}")
-                    scores[idx] = 0.7
+                    logger.debug(f"LLM validation error for outfit {outfit_idx}: {e}")
+                    scores[outfit_idx] = 0.7
 
             return scores
 
@@ -426,13 +492,38 @@ class RecommendationAgentV2(BaseAgent):
             logger.warning(f"Error scoring with LLM: {e}")
             return {}
 
+    def _extract_llm_confidence(self, explanation: str) -> float:
+        """Extract confidence score from LLM explanation.
+
+        Args:
+            explanation: LLM explanation text
+
+        Returns:
+            Confidence score (0-1)
+        """
+        import re
+
+        # Look for confidence mention in explanation
+        match = re.search(r'confidence["\']?\s*:?\s*([0-9]*\.?[0-9]+)', explanation, re.IGNORECASE)
+        if match:
+            try:
+                conf = float(match.group(1))
+                return max(0.0, min(1.0, conf))
+            except (ValueError, IndexError):
+                pass
+
+        # Default: very coherent explanations get 0.85, others get 0.7
+        if len(explanation) > 100 and ("parfait" in explanation.lower() or "excellent" in explanation.lower()):
+            return 0.85
+        return 0.75
+
     def _compose_outfit_candidates(
         self,
         items: list,
         sft_scores: dict[str, float],
         top_k: int = 3,
     ) -> list[list]:
-        """Compose outfit candidates using greedy selection.
+        """Compose outfit candidates using greedy selection without duplicates.
 
         Args:
             items: Candidate items
@@ -448,45 +539,46 @@ class RecommendationAgentV2(BaseAgent):
             category = str(getattr(item, "category", "other")).lower()
             by_category.setdefault(category, []).append(item)
 
-        # Generate top_k outfits
-        outfits = []
+        # Sort each category by SFT score (descending)
+        for category in by_category:
+            by_category[category].sort(
+                key=lambda x: sft_scores.get(str(getattr(x, "id", "")), 0.5),
+                reverse=True,
+            )
 
-        # Greedy: pick best item from each category
+        # Generate top_k outfits without item repetition
+        outfits = []
+        used_items = set()  # Track items already used
+
         for _ in range(top_k):
             outfit = []
 
-            # Prefer robe if available
+            # Try to pick best available item from each category
             for category in ["robe", "haut", "bas", "chaussures"]:
                 candidates = by_category.get(category, [])
-                if candidates:
-                    # Pick highest SFT score
-                    best_item = max(
-                        candidates,
-                        key=lambda x: sft_scores.get(str(getattr(x, "id", "")), 0.5),
-                    )
-                    outfit.append(best_item)
+                if not candidates:
+                    continue
 
-                    # Remove from future rounds (optional: can allow repetition)
-                    # candidates.remove(best_item)
+                # Find first unused item in this category
+                for item in candidates:
+                    item_id = str(getattr(item, "id", ""))
+                    if item_id not in used_items:
+                        outfit.append(item)
+                        used_items.add(item_id)
+                        break
 
             if outfit:
                 outfits.append(outfit)
 
-            if len(outfits) >= top_k:
-                break
-
-        # If we don't have enough outfits, generate more with variation
+        # If we don't have enough outfits, generate more allowing repetition
         if len(outfits) < top_k:
-            # Pick random items
-            import random
-
             for _ in range(top_k - len(outfits)):
                 outfit = []
                 for category in ["robe", "haut", "bas", "chaussures"]:
                     candidates = by_category.get(category, [])
                     if candidates:
-                        item = random.choice(candidates)
-                        outfit.append(item)
+                        # Just pick the best one
+                        outfit.append(candidates[0])
                 if outfit:
                     outfits.append(outfit)
 
@@ -523,11 +615,11 @@ class RecommendationAgentV2(BaseAgent):
         # Compute average SFT score
         sft_score = np.mean([sft_scores.get(item_id, 0.7) for item_id in item_ids]) if item_ids else 0.7
 
-        # Get LLM score (outfits are indexed by their position)
+        # Get LLM score (llm_scores uses outfit index directly)
         llm_confidence = None
-        outfit_index = len([x for x in llm_scores.keys() if isinstance(x, int)])
-        if outfit_index in llm_scores:
-            llm_confidence = llm_scores[outfit_index]
+        # Need to track outfit index separately; this is passed as parameter below
+        if hasattr(self, '_current_outfit_idx') and self._current_outfit_idx in llm_scores:
+            llm_confidence = llm_scores[self._current_outfit_idx]
 
         # Generate explanation
         context = {

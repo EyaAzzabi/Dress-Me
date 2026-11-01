@@ -87,6 +87,18 @@ class ExplanationEngine:
         for choice in item_choices:
             explanation_parts.append(f"• {choice['item']}: {choice['reason']}")
 
+        # Alternatives rejected (need to pass all candidate items for comparison)
+        # For now, if we have metadata about candidates, we can explain rejections
+        alternatives_text = ""
+        if items_metadata and "candidates" in items_metadata:
+            alternatives_text = ExplanationEngine._explain_alternatives_rejected(
+                items_metadata["candidates"],
+                outfit,
+                context,
+            )
+            if alternatives_text:
+                explanation_parts.append(f"\n✗ {alternatives_text}")
+
         # Weather verification
         weather_verified = False
         weather_fit_text = ""
@@ -117,7 +129,7 @@ class ExplanationEngine:
             "explanation": explanation,
             "reasoning": {
                 "item_choices": item_choices,
-                "alternatives_rejected": [],  # Could be enriched with rejected candidates
+                "alternatives_rejected": alternatives_text.split("; ") if alternatives_text else [],
                 "weather_fit": weather_fit_text,
                 "occasion_fit": occasion_fit_text,
             },
