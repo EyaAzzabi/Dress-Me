@@ -90,18 +90,100 @@ export interface PackingList {
   items: ClothingItem[];
 }
 
+export interface CatalogAlternative {
+  item_key?: string | null;
+  name: string;
+  price: string | number | null;
+  brand: string | null;
+  category: string | null;
+  image_url: string | null;
+  similarity?: number | null;
+  cheaper?: boolean | null;
+  product_url?: string | null;
+  store_url?: string | null;
+  buyable?: boolean;
+}
+
+export interface BrandRecommendation {
+  name: string;
+  website: string | null;
+  affinity: number;
+  product_count: number;
+  price_min: number | null;
+  price_max: number | null;
+  showcase: CatalogAlternative[];
+}
+
 export interface PurchaseResult {
   verdict: "recommended" | "think_twice" | "not_recommended";
+  score?: number;
   compatibility_score: number;
   similar_item_ids: string[];
-  catalog_alternatives: {
-    name: string;
-    price: string | number | null;
-    brand: string | null;
-    category: string | null;
-    image_url: string | null;
-  }[];
+  catalog_alternatives: CatalogAlternative[];
+  tunisian_brands?: BrandRecommendation[];
   explanation: string;
+}
+
+export interface PurchaseHistoryItem {
+  id: string;
+  image_url: string;
+  category: string;
+  color: string | null;
+  price: number | null;
+  verdict: PurchaseResult["verdict"];
+  score: number;
+  result: PurchaseResult;
+  created_at: string;
+}
+
+export interface WishlistEntry {
+  item_key: string;
+  name: string;
+  brand: string | null;
+  category: string | null;
+  image_url: string | null;
+  saved_price: number | null;
+  live_price: number | null;
+  available: boolean | null;
+  price_drop: number | null;
+  product_url: string | null;
+  store_url: string | null;
+  buyable: boolean;
+  created_at: string;
+}
+
+export function formatTnd(value: string | number | null | undefined): string | null {
+  if (value == null) return null;
+  const amount = typeof value === "number" ? value : parseFloat(String(value).replace(",", "."));
+  if (!Number.isFinite(amount)) return String(value);
+  return `${amount.toFixed(amount % 1 === 0 ? 0 : 2).replace(".", ",")} TND`;
+}
+
+export async function getPurchaseHistory() {
+  const { data } = await api.get<PurchaseHistoryItem[]>("/purchase/history");
+  return data;
+}
+
+export async function deleteHistoryEntry(id: string) {
+  await api.delete(`/purchase/history/${id}`);
+}
+
+export async function clearPurchaseHistory() {
+  await api.delete("/purchase/history");
+}
+
+export async function getWishlist() {
+  const { data } = await api.get<WishlistEntry[]>("/purchase/wishlist");
+  return data;
+}
+
+export async function addToWishlist(itemKey: string) {
+  const { data } = await api.post<WishlistEntry>("/purchase/wishlist", { item_key: itemKey });
+  return data;
+}
+
+export async function removeFromWishlist(itemKey: string) {
+  await api.delete(`/purchase/wishlist/${encodeURIComponent(itemKey)}`);
 }
 
 export interface CurrentUser {

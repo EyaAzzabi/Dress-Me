@@ -39,6 +39,9 @@ backend/scripts/.extract_preview/
 # Local Postgres data dir when running without Docker.
 backend/.pgdata/
 
+# Purchase LLM LoRA training checkpoints (the saved adapter itself can be committed).
+backend/app/ml/artifacts/purchase_llm/runs/
+
 # OS
 .DS_Store
 Thumbs.db

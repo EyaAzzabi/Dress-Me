@@ -48,6 +48,11 @@ def _run(attrs, wardrobe: list[tuple[ClothingItem, np.ndarray]], price=None) -> 
 
 
 @pytest.fixture(autouse=True)
+def no_purchase_llm(monkeypatch):
+    monkeypatch.setattr(pa.purchase_llm, "run_agent", lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
 def fake_catalog(monkeypatch):
     """Isolates these tests from the real catalog index (CatalogIndex has its own tests)."""
     matches = [CatalogMatch(item_key=f"kontakt_produit-{int(p)}", name=f"Produit {p}", brand="Kontakt",

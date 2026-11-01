@@ -243,12 +243,14 @@ class AgentOrchestrator:
                                    for d in result.get("duplicates", [])]
             facts["price"] = price
             facts["has_wardrobe_evidence"] = any(str(item.id) in embeddings for item in wardrobe["items"])
-            explanation = self.llm_agent.run(
-                task="purchase", context=facts, cache_scope=str(user_id),
-                instruction="Explique le verdict fixé ; utiliser l'existant avant d'acheter.",
-            )["explanation"]
-            if explanation:
-                result = {**result, "explanation": explanation}
+            if not result.get("llm"):
+                # PurchaseAgent already phrased the verdict when its tool-calling LLM ran.
+                explanation = self.llm_agent.run(
+                    task="purchase", context=facts, cache_scope=str(user_id),
+                    instruction="Explique le verdict fixé ; utiliser l'existant avant d'acheter.",
+                )["explanation"]
+                if explanation:
+                    result = {**result, "explanation": explanation}
         return result
 
     def get_style_profile(self, *, user_id: uuid.UUID) -> dict[str, Any]:

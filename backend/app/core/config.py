@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # Optional provider overrides; llama requires both URL and model.
     llm_base_url: str | None = None
     llm_model: str | None = None
+    # Purchase-only: LoRA-adapted Qwen2.5 tool-calling agent (or the same prompt via
+    # LLM_PROVIDER). Scores and sandbox tools stay deterministic either way.
+    purchase_llm_enabled: bool = True
     # Optional stronger model for conversation only; saved narratives keep llm_model.
     llm_chat_model: str | None = None
     llm_chat_fallback_model: str | None = None
