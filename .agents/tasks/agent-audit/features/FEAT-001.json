@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Fix immediate bugs and issues in recommendation agent system: test timeouts, duplicate imports, error handling gaps, and RLHF CLI argument propagation",
+  "status": "pending",
+  "steps": [
+    "Investigate and fix test timeout in backend/tests/test_recommendation_agent_v2.py. Likely causes: unpatched external dependencies or infinite loops. Add proper mocking and timeouts.",
+    "Remove duplicate LLMAgent import in backend/app/agents/orchestrator.py (lines 8-9).",
+    "Improve error handling in RecommendationAgentV2._load_models(), _score_items(), and weather service calls. Ensure all exceptions are caught with proper fallbacks.",
+    "Fix RLHF training script CLI argument propagation: pass --min-pairs argument to build_preference_pairs() function.",
+    "Remove duplicate RLHF navigation entry in frontend App.tsx NAV_ITEMS array.",
+    "Add missing type hints to critical methods in recommendation_agent_v2.py.",
+    "Run verification: cd backend && python -m pytest tests/test_recommendation_agent_v2.py -v --tb=short completes within 30 seconds."
+  ],
+  "acceptance_criteria": [
+    "All tests in test_recommendation_agent_v2.py run to completion without timeout",
+    "No duplicate imports in orchestrator.py",
+    "RecommendationAgentV2 handles all error cases gracefully with fallbacks",
+    "RLHF training script correctly uses --min-pairs argument",
+    "Frontend builds without duplicate navigation items",
+    "All methods in recommendation_agent_v2.py have proper type hints"
+  ],
+  "verification": [
+    "cd backend && python -m pytest tests/test_recommendation_agent_v2.py -v --tb=short (should complete in <30s)",
+    "cd backend && python -c \"from app.agents.orchestrator import AgentOrchestrator; import inspect; src=inspect.getsource(AgentOrchestrator); assert src.count('from app.agents.llm_agent import LLMAgent') == 1, 'Duplicate import found'\"",
+    "cd backend && python -c \"import app.agents.recommendation_agent_v2; import inspect; methods=inspect.getmembers(app.agents.recommendation_agent_v2.RecommendationAgentV2, predicate=inspect.isfunction); for name,method in methods: if not name.startswith('_'): sig=inspect.signature(method); assert sig.return_annotation != inspect.Parameter.empty, f'Missing return type: {name}'\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

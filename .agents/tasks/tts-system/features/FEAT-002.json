@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Frontend TTS components and API integration: TypeScript API client methods, reusable TTSSpeaker React component with play/pause/stop controls and loading/error states, and global TTSContext for managing audio playback across the app.",
+  "status": "pending",
+  "steps": [
+    "1. Add TTS API client methods to e:\\Téléchargements\\Dress-Me-main\\frontend\\web\\src\\api.ts following the existing api.post/get patterns: export async function speakText(text: string): Promise<Blob> that calls POST /api/v1/tts/speak and returns response.blob(), export async function speakRecommendation(outfitId: string): Promise<Blob> that calls GET /api/v1/tts/recommendation/{outfitId} and returns response.blob()",
+    "2. Create e:\\Téléchargements\\Dress-Me-main\\frontend\\web\\src\\TTSContext.tsx: React Context provider with state for currentAudio (HTMLAudioElement | null), isPlaying (boolean), isMuted (boolean), currentOutfitId (string | null). Methods: playAudio(blob: Blob, outfitId?: string), pauseAudio(), stopAudio(), toggleMute(). Use useEffect cleanup to stop audio on unmount. Export TTSProvider component and useTTS hook.",
+    "3. Create e:\\Téléchargements\\Dress-Me-main\\frontend\\web\\src\\TTSSpeaker.tsx: React component accepting props { text?: string, outfitId?: string, compact?: boolean }. Uses useTTS hook from TTSContext. Shows speaker icon button (🔊 when playing, 🔇 when paused). OnClick: if text provided call speakText(text) then playAudio(blob), if outfitId provided call speakRecommendation(outfitId) then playAudio(blob, outfitId). Shows loading spinner during fetch (busy state). Shows error message on catch (inline, red text, 3s timeout to clear). Include play/pause toggle when audio is active. Follow existing App.tsx button styling patterns (.button class).",
+    "4. Wrap the App component in e:\\Téléchargements\\Dress-Me-main\\frontend\\web\\src\\main.tsx with <TTSProvider> following the React context pattern",
+    "5. Add volume control UI to TTSContext: add volume state (0.0-1.0, default 1.0), setVolume method, apply to HTMLAudioElement.volume. Export from context for optional external controls."
+  ],
+  "acceptance_criteria": [
+    "api.ts exports speakText and speakRecommendation functions returning Promise<Blob>",
+    "TTSContext.tsx provides TTSProvider and useTTS hook with playAudio, pauseAudio, stopAudio, toggleMute methods",
+    "TTSSpeaker.tsx component exists, accepts text or outfitId props, shows speaker icon, handles loading/error states",
+    "App wrapped with TTSProvider in main.tsx",
+    "Volume control state available in TTSContext",
+    "TypeScript compilation succeeds: npx tsc --noEmit from frontend/web"
+  ],
+  "verification": [
+    "Run: cd e:\\Téléchargements\\Dress-Me-main\\frontend\\web && npx tsc --noEmit (no type errors)",
+    "Check: e:\\Téléchargements\\Dress-Me-main\\frontend\\web\\src\\api.ts exports speakText and speakRecommendation",
+    "Check: e:\\Téléchargements\\Dress-Me-main\\frontend\\web\\src\\TTSContext.tsx exports TTSProvider and useTTS",
+    "Check: e:\\Téléchargements\\Dress-Me-main\\frontend\\web\\src\\TTSSpeaker.tsx exports default component",
+    "Check: e:\\Téléchargements\\Dress-Me-main\\frontend\\web\\src\\main.tsx wraps App in TTSProvider",
+    "Manual test: Start dev server (npm run dev), open browser console, verify no runtime errors on page load"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

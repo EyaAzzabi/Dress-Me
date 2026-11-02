@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-003",
+  "type": "refactor",
+  "description": "Refactor recommendation system architecture: create RecommendationOrchestrator, ComponentManager, ScoringRegistry, and FallbackStrategy for loose coupling and extensibility",
+  "status": "pending",
+  "steps": [
+    "Design and implement RecommendationOrchestrator in backend/app/agents/recommendation_orchestrator.py that coordinates components without tight coupling.",
+    "Create ComponentManager in backend/app/agents/component_manager.py for dynamic loading and management of recommendation components.",
+    "Implement ScoringRegistry in backend/app/agents/scoring_registry.py for pluggable scoring strategies with priority and weight configuration.",
+    "Create FallbackStrategy system in backend/app/agents/fallback_strategy.py with configurable fallback chains and degradation policies.",
+    "Refactor agent interfaces in backend/app/agents/base.py and create backend/app/agents/interfaces.py with clear contracts and versioning.",
+    "Create adapter classes to make existing RecommendationAgentV2 and other components work with new architecture.",
+    "Update orchestrator.py to use new RecommendationOrchestrator (optional, can run alongside existing).",
+    "Test new architecture: verify components can be added/removed dynamically, system more resilient to failures."
+  ],
+  "acceptance_criteria": [
+    "RecommendationOrchestrator can coordinate different scoring strategies and components",
+    "Components can be registered, discovered, and loaded dynamically via ComponentManager",
+    "Multiple scoring strategies can be combined with configurable weights via ScoringRegistry",
+    "System gracefully degrades when components fail using FallbackStrategy",
+    "All agents implement standardized interface from interfaces.py",
+    "Existing functionality preserved through adapter pattern",
+    "New architecture produces same results as old system (verified by tests)"
+  ],
+  "verification": [
+    "cd backend && python -c \"from app.agents.recommendation_orchestrator import RecommendationOrchestrator; from app.agents.component_manager import ComponentManager; cm=ComponentManager(); ro=RecommendationOrchestrator(cm); print('Architecture OK')\"",
+    "cd backend && python -c \"from app.agents.scoring_registry import ScoringRegistry; sr=ScoringRegistry(); sr.register('test_scorer', lambda x: {'score': 0.5}); print('ScoringRegistry OK')\"",
+    "cd backend && python -c \"from app.agents.fallback_strategy import FallbackStrategy; fs=FallbackStrategy(); fs.add_fallback('primary', 'fallback'); print('FallbackStrategy OK')\"",
+    "cd backend && python -m pytest tests/test_recommendation_orchestrator.py -v (create orchestrator tests)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

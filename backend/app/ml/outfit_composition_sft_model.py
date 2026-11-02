@@ -10,10 +10,13 @@ Per-user: artifacts/outfit_composition_sft_{user_id[:8]}.pt
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # Optional torch import
 try:
@@ -121,6 +124,31 @@ if _TORCH_AVAILABLE:
             scores = self.item_classifier(combined)  # (batch, num_items, 1)
             return scores.squeeze(-1)  # (batch, num_items)
 
+        def predict(
+            self,
+            item_embeddings: list | "np.ndarray",
+            item_ids: list[str],
+            season: str | None = None,
+            weather: str | None = None,
+            occasion: str | None = None,
+            formality: int | None = None,
+            threshold: float = 0.5,
+        ) -> dict[str, Any]:
+            """Predict which items should be in outfit.
+            
+            Wrapper method that calls the module-level predict function.
+            """
+            return predict(
+                self,
+                item_embeddings if isinstance(item_embeddings, list) else [item_embeddings],
+                item_ids,
+                season,
+                weather,
+                occasion,
+                formality,
+                threshold,
+            )
+
 else:  # pragma: no cover
 
     class OutfitCompositionSFTModel:  # type: ignore[no-redef]
@@ -145,24 +173,47 @@ def load_or_init(user_id: str | None = None) -> OutfitCompositionSFTModel:
     if not _TORCH_AVAILABLE:  # pragma: no cover
         return OutfitCompositionSFTModel()
 
+    artifacts_dir = Path(__file__).resolve().parent / "artifacts"
+    model = OutfitCompositionSFTModel()
+    
+    # Try to load any saved model (Polyvore trained or per-user)
+    possible_paths = []
+    
+    # Per-user model
     if user_id:
-        artifact_path = (
-            Path(__file__).resolve().parent
-            / "artifacts"
-            / f"outfit_composition_sft_{user_id[:8]}.pt"
-        )
-        model = OutfitCompositionSFTModel()
+        possible_paths.append(artifacts_dir / f"outfit_composition_sft_{user_id[:8]}.pt")
+    
+    # Global models
+    possible_paths.extend([
+        artifacts_dir / "outfit_composition_sft.pt",  # Polyvore trained
+    ])
+    
+    for artifact_path in possible_paths:
         if artifact_path.exists():
             try:
                 state = torch.load(str(artifact_path), map_location="cpu", weights_only=True)
-                model.load_state_dict(state)
-                model._trained = True
-            except Exception:
-                pass
-        model.eval()
-        return model
-
-    return OutfitCompositionSFTModel()
+                
+                # Handle state dict mismatch gracefully
+                model_state = model.state_dict()
+                
+                # Only load compatible keys
+                compatible_state = {}
+                for key, value in state.items():
+                    if key in model_state and model_state[key].shape == value.shape:
+                        compatible_state[key] = value
+                
+                if compatible_state:
+                    model.load_state_dict(compatible_state, strict=False)
+                    model._trained = True
+                    logger.info(f"Loaded {len(compatible_state)} compatible weights from {artifact_path.name}")
+                    model.eval()
+                    return model
+            except Exception as e:
+                logger.debug(f"Could not load {artifact_path}: {e}")
+                continue
+    
+    model.eval()
+    return model
 
 
 def save(model: OutfitCompositionSFTModel, user_id: str) -> None:

@@ -6,6 +6,20 @@ from unittest.mock import Mock, patch, MagicMock
 from app.agents.recommendation_agent_v2 import RecommendationAgentV2
 
 
+@pytest.fixture(autouse=True)
+def mock_dependencies():
+    """Mock heavy dependencies for all tests."""
+    with patch.dict('sys.modules', {'torch': None}):
+        with patch('app.ml.explanation_engine.ExplanationEngine') as mock_exp:
+            mock_exp.generate_explanation.return_value = {'explanation': 'test explanation', 'weather_verified': True, 'confidence': 0.7, 'reasoning': {}}
+            with patch('app.ml.recommendation_llm.RecommendationToolSandbox'):
+                with patch('app.ml.recommendation_llm.run_agent', return_value={'explanation': 'test'}):
+                    with patch('app.db.vector_store.fetch_embeddings', return_value={}):
+                        with patch('app.services.weather_verification.WeatherVerificationService') as mock_weather:
+                            mock_weather.get_weather.return_value = {'temperature': 20.0, 'condition': 'sunny', 'confidence': 0.7}
+                            yield
+
+
 @pytest.fixture
 def agent():
     """Create a RecommendationAgentV2 instance."""

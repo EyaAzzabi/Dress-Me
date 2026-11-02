@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Backend TTS infrastructure: service class, config settings, API routes, and caching. Provides text-to-speech MP3 generation using gTTS with hash-based file caching and two endpoints: generic /tts/speak and convenience /tts/recommendation/{id} that reads outfit explanations from the database.",
+  "status": "pending",
+  "steps": [
+    "1. Add gTTS>=2.5 to e:\\Téléchargements\\Dress-Me-main\\backend\\requirements.txt (French TTS library, no API key needed)",
+    "2. Add TTS config settings to e:\\Téléchargements\\Dress-Me-main\\backend\\app\\core\\config.py following the existing pattern: tts_enabled: bool = True, tts_provider: str = 'gtts', tts_language: str = 'fr', tts_cache_dir: str = './tts_cache' (with comment explaining hash-based caching strategy)",
+    "3. Create e:\\Téléchargements\\Dress-Me-main\\backend\\app\\services\\tts_service.py following the StorageService pattern from storage.py: class TTSService with is_configured() returning settings.tts_enabled, speak(text: str) -> bytes method that generates MP3 via gTTS, _hash_text(text) helper using hashlib.sha256 for cache keys, file caching in settings.tts_cache_dir with .mp3 extension, cache hit returns cached bytes, cache miss generates and saves before returning",
+    "4. Create e:\\Téléchargements\\Dress-Me-main\\backend\\app\\api\\routes\\tts.py with router = APIRouter(prefix='/tts', tags=['tts']). Add POST /speak endpoint accepting text (1-2000 chars) returning StreamingResponse with audio/mpeg content-type, GET /recommendation/{outfit_id} endpoint that fetches Outfit record (with owner_id check per recommendations.py pattern), reads outfit.explanation field, passes to TTSService.speak(), returns StreamingResponse or 404 if outfit not found or 503 if TTS not configured",
+    "5. Register the tts router in e:\\Téléchargements\\Dress-Me-main\\backend\\app\\api\\routes\\__init__.py: import tts module and add api_router.include_router(tts.router) following the existing pattern after rlhf.router",
+    "6. Create the TTS cache directory in e:\\Téléchargements\\Dress-Me-main\\backend\\app\\main.py at startup following the local_storage_dir pattern: if settings.tts_enabled and settings.tts_cache_dir, create Path(settings.tts_cache_dir).mkdir(parents=True, exist_ok=True)",
+    "7. Create e:\\Téléchargements\\Dress-Me-main\\backend\\tests\\test_tts_service.py with pytest tests: test_tts_service_is_configured_when_enabled (monkeypatch settings.tts_enabled=True), test_tts_service_disabled_when_flag_off, test_speak_generates_mp3_bytes (mock gTTS), test_speak_uses_cache_on_second_call (tmpdir fixture for cache_dir, assert file exists, assert second call doesn't regenerate), test_hash_consistency (same text = same hash)"
+  ],
+  "acceptance_criteria": [
+    "gTTS appears in requirements.txt with version pin >=2.5",
+    "Config.py has 4 new TTS settings with proper types and defaults",
+    "TTSService class exists with is_configured() and speak() methods, follows storage.py coding style",
+    "Two TTS routes registered: POST /api/v1/tts/speak and GET /api/v1/tts/recommendation/{id}",
+    "tts router imported and registered in __init__.py",
+    "TTS cache directory created at app startup when enabled",
+    "pytest tests in test_tts_service.py all pass, covering service logic and caching"
+  ],
+  "verification": [
+    "Run: cd e:\\Téléchargements\\Dress-Me-main\\backend && pytest tests/test_tts_service.py -v (all tests pass)",
+    "Run: cd e:\\Téléchargements\\Dress-Me-main\\backend && pytest tests -q (all existing tests still pass)",
+    "Start backend: cd e:\\Téléchargements\\Dress-Me-main\\backend && uvicorn app.main:app --reload --port 8000",
+    "Check: http://localhost:8000/docs shows /api/v1/tts/speak and /api/v1/tts/recommendation/{outfit_id} in the Swagger UI under 'tts' tag",
+    "Manual test via Swagger UI: POST /api/v1/tts/speak with body {\"text\": \"Bonjour, ceci est un test\"} returns audio/mpeg response, second identical call is instant (cache hit)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

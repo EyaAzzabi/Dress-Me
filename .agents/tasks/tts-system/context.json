@@ -1,0 +1,27 @@
+{
+  "project_type": "FastAPI backend (Python) + React/Vite frontend (TypeScript)",
+  "language": "Python 3.11+ (backend), TypeScript (frontend)",
+  "build_system": "pip for backend deps, npm for frontend. Backend uses uvicorn with --reload for dev. Frontend uses Vite dev server.",
+  "test_framework": "pytest in backend/tests/. Fixtures use SQLite in-memory DB. Frontend uses TypeScript compiler (tsc --noEmit) for type checking.",
+  "build_command": "Backend: uvicorn app.main:app --reload --port 8000 (from backend/). Frontend: npm run dev (from frontend/web/)",
+  "test_command": "Backend: pytest tests -q (from backend/). Frontend: cd frontend/web && npx tsc --noEmit",
+  "verification_instructions": "1. Start backend: cd backend && uvicorn app.main:app --reload --port 8000. 2. Check http://localhost:8000/docs shows new /api/v1/tts/* endpoints. 3. Start frontend: cd frontend/web && npm run dev. 4. Open http://localhost:5173, log in, generate outfits, click speaker icon. 5. Run pytest tests -q from backend/",
+  "snapshot_or_generated_files": null,
+  "environment_constraints": "Backend runs on port 8000, frontend web on 5173. CORS origins already configured for localhost:5173. Postgres in Docker on 5432. Storage uses LOCAL_STORAGE_DIR for dev. French is the UI language and TTS language.",
+  "contribution_requirements": "Add Alembic migration for any DB schema changes (none needed here). Keep routes thin, logic in services/agents. Match existing code style. Test with pytest. Use absolute paths with e:\\Téléchargements\\Dress-Me-main prefix.",
+  "key_patterns": "Services in backend/app/services/ follow StorageService pattern: class with is_configured() method, lru_cache for expensive resources. Routes in backend/app/api/routes/ are thin, import from services/agents. Config in backend/app/core/config.py uses pydantic-settings with .env file. Frontend API calls via src/api.ts. React components in src/ (flat, not nested). French UI text throughout.",
+  "relevant_files": [
+    "e:\\Téléchargements\\Dress-Me-main\\backend\\requirements.txt",
+    "e:\\Téléchargements\\Dress-Me-main\\backend\\app\\core\\config.py",
+    "e:\\Téléchargements\\Dress-Me-main\\backend\\app\\services\\storage.py",
+    "e:\\Téléchargements\\Dress-Me-main\\backend\\app\\api\\routes\\recommendations.py",
+    "e:\\Téléchargements\\Dress-Me-main\\backend\\app\\api\\routes\\llm.py",
+    "e:\\Téléchargements\\Dress-Me-main\\backend\\app\\api\\routes\\__init__.py",
+    "e:\\Téléchargements\\Dress-Me-main\\backend\\app\\main.py",
+    "e:\\Téléchargements\\Dress-Me-main\\backend\\tests\\test_calendar_render.py",
+    "e:\\Téléchargements\\Dress-Me-main\\frontend\\web\\package.json",
+    "e:\\Téléchargements\\Dress-Me-main\\frontend\\web\\src\\App.tsx",
+    "e:\\Téléchargements\\Dress-Me-main\\frontend\\web\\src\\api.ts"
+  ],
+  "directory_structure": "backend/app/services/ (business logic), backend/app/api/routes/ (REST endpoints), backend/app/core/config.py (settings), backend/tests/ (pytest tests), frontend/web/src/ (React components and API client). Agents in backend/app/agents/ but TTS is a service not an agent."
+}

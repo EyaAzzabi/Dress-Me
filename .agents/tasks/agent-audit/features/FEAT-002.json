@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Implement configuration and feature flag system for maximum flexibility: feature flags, configurable scoring weights, centralized configuration management",
+  "status": "pending",
+  "steps": [
+    "Create feature flag system in backend/app/core/features.py with support for env vars, database flags, and runtime configuration.",
+    "Make RecommendationAgentV2 scoring weights configurable via environment variables (move _ALPHA, _BETA, _GAMMA to settings).",
+    "Create ConfigurationManager class in backend/app/agents/config_manager.py for centralized agent configuration.",
+    "Add Pydantic validation schemas for agent configuration in backend/app/agents/schemas.py.",
+    "Update RecommendationAgentV2 to use ConfigurationManager instead of hardcoded values.",
+    "Add feature flags for: USE_RLHF_MODEL, ENABLE_LLM_VALIDATION, ENABLE_WEATHER_VERIFICATION, ENABLE_SFT_SCORING.",
+    "Update documentation in backend/.env.example with new configuration options.",
+    "Test configuration system: verify feature flags work, weights configurable, validation catches errors."
+  ],
+  "acceptance_criteria": [
+    "Feature flags can be enabled/disabled via environment variables",
+    "Scoring weights can be changed without code modification",
+    "ConfigurationManager provides single source of truth for agent config",
+    "Invalid configuration caught at startup with clear error messages",
+    "All existing functionality works with new configuration system",
+    ".env.example documents all new configuration options"
+  ],
+  "verification": [
+    "cd backend && python -c \"from app.core.features import FeatureFlags; ff=FeatureFlags(); print('FeatureFlags OK')\"",
+    "cd backend && python -c \"from app.agents.config_manager import AgentConfiguration; config=AgentConfiguration(); weights=config.get_scoring_weights(); print(f'Weights: {weights}')\"",
+    "cd backend && python -c \"import os; os.environ['RECOMMENDATION_SFT_WEIGHT']='0.5'; from app.agents.config_manager import AgentConfiguration; config=AgentConfiguration(); assert config.get_scoring_weights().get('sft') == 0.5, 'Weight not configurable'\"",
+    "cd backend && python -m pytest tests/ -k config -v (create config tests if needed)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -18,6 +19,8 @@ import httpx
 
 from app.core.config import get_settings
 from app.ml.compatibility_model import pair_compatibility
+
+logger = logging.getLogger(__name__)
 
 # Optional torch imports
 try:
@@ -343,7 +346,8 @@ def _generate_local(messages: list[dict]) -> str:
         return tokenizer.decode(
             output[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True
         )
-    except Exception:  # pragma: no cover
+    except Exception as e:  # pragma: no cover
+        logger.debug(f"Local LLM generation error: {e}")
         return ""
 
 
@@ -361,11 +365,12 @@ def _generate_api(messages: list[dict]) -> str:
             f"{base_url.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {api_key or 'ollama'}"},
             json={"model": model, "messages": messages, "temperature": 0.2, "max_tokens": 200},
-            timeout=30.0,
+            timeout=120.0,  # Increased for Ollama/local models
         )
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"] or ""
-    except Exception:  # pragma: no cover
+    except Exception as e:  # pragma: no cover
+        logger.debug(f"API LLM generation error: {e}")
         return ""
 
 

@@ -16,6 +16,10 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import unicodedata
+from datetime import date, datetime, timedelta
+from itertools import product
 from typing import Any
 
 import numpy as np
@@ -23,6 +27,8 @@ import numpy as np
 from app.agents.base import BaseAgent
 from app.core.config import get_settings
 from app.db import vector_store
+from app.ml import compatibility_model
+from app.ml.constraint_parser import ConstraintParser
 from app.ml.explanation_engine import ExplanationEngine
 from app.ml.recommendation_llm import RecommendationToolSandbox, run_agent as llm_run_agent
 from app.services.weather_verification import WeatherVerificationService
@@ -50,7 +56,11 @@ class RecommendationAgentV2(BaseAgent):
         self._BETA = settings.recommendation_llm_weight
         self._GAMMA = settings.recommendation_compatibility_weight
         self._NEUTRAL_SCORE = settings.recommendation_neutral_score
-        self._CATEGORIES_ORDER = settings.recommendation_categories_order.split(",")
+        self._constraint_parser = ConstraintParser()
+        self._CATEGORIES_ORDER = [
+            self._canonical_category(category)
+            for category in settings.recommendation_categories_order.split(",")
+        ]
 
     def run(
         self,
@@ -110,16 +120,24 @@ class RecommendationAgentV2(BaseAgent):
             return {"outfits": []}
 
         try:
+            constraints = self._constraint_parser.parse(request_text, use_llm=False)
+            season = season or constraints.get("season")
+            if not occasion and constraints.get("occasions"):
+                occasion = constraints["occasions"][0]
+            formality = kwargs.get("formality")
+            if formality is None:
+                formality = self._formality_value(constraints.get("formality"))
+
             # Pipeline steps
             # 1. Fetch real weather
             weather_data = self._fetch_weather(city, temperature, weather)
 
             # 2. Filter candidates by season + weather constraints
             filtered_items = self._filter_candidates(wardrobe_items, season, weather_data)
-
             if not filtered_items:
-                # Fallback: use all items if filtering yields nothing
-                filtered_items = wardrobe_items
+                return {"outfits": []}
+
+            compatibility_embeddings = self._fetch_compatibility_embeddings(filtered_items)
 
             # 3. Load models (SFT + optional RLHF policy) via FIX-3 fallback chain
             models = self._load_models(user_id)
@@ -132,12 +150,24 @@ class RecommendationAgentV2(BaseAgent):
                 season,
                 temperature,
                 weather_data,
+                formality=formality,
+                embeddings=compatibility_embeddings,
+            )
+            sft_scores = self._apply_personalization(
+                sft_scores, filtered_items, {**kwargs, "constraints": constraints, "formality": formality}
             )
 
-            # 5. Compose outfits (deterministic greedy for now)
+            # 5. Compose complete outfits and rank them by item and style compatibility.
             outfit_candidates = self._compose_outfit_candidates(
-                filtered_items, sft_scores, top_k
+                filtered_items,
+                sft_scores,
+                top_k,
+                season=season,
+                occasion=occasion,
+                compatibility_embeddings=compatibility_embeddings,
             )
+            if not outfit_candidates:
+                return {"outfits": []}
 
             # 6. Score with LLM validation (optional)
             llm_scores = {}
@@ -157,7 +187,6 @@ class RecommendationAgentV2(BaseAgent):
             # 7. Generate explanations
             outfits = []
             for outfit_idx, outfit_items in enumerate(outfit_candidates):
-                self._current_outfit_idx = outfit_idx  # Track for LLM lookup
                 outfit_dict = self._build_outfit_dict(
                     outfit_items,
                     sft_scores,
@@ -167,6 +196,13 @@ class RecommendationAgentV2(BaseAgent):
                     season,
                     temperature,
                     request_text,
+                    outfit_idx=outfit_idx,
+                    compatibility_score=self._score_outfit_compatibility(
+                        outfit_items,
+                        season,
+                        occasion,
+                        compatibility_embeddings=compatibility_embeddings,
+                    ),
                 )
                 outfits.append(outfit_dict)
 
@@ -185,6 +221,16 @@ class RecommendationAgentV2(BaseAgent):
             if user_id:
                 return str(user_id)[:8]
         return ""
+
+    @staticmethod
+    def _fetch_compatibility_embeddings(items: list) -> dict[str, Any]:
+        item_ids = [str(getattr(item, "id", "")) for item in items]
+        try:
+            embeddings = vector_store.fetch_embeddings(item_ids)
+            return {str(item_id): embedding for item_id, embedding in embeddings.items()}
+        except Exception:
+            logger.warning("Could not load outfit compatibility embeddings", exc_info=True)
+            return {}
 
     def _fetch_weather(
         self,
@@ -208,13 +254,13 @@ class RecommendationAgentV2(BaseAgent):
             else:
                 # Create a synthetic weather dict from provided values
                 weather_data = {
-                    "temperature": temperature or 20.0,
+                    "temperature": temperature if temperature is not None else 20.0,
                     "condition": (weather or "sunny").lower(),
                     "humidity": 50,
                     "wind_speed": 0.0,
                     "pressure": 1013,
                     "uv_index": None,
-                    "confidence": 0.7 if temperature and weather else 0.5,
+                    "confidence": 0.7 if temperature is not None and weather else 0.5,
                     "cached": False,
                     "error": None,
                 }
@@ -222,7 +268,7 @@ class RecommendationAgentV2(BaseAgent):
         except Exception as e:
             logger.warning(f"Error fetching weather: {e}")
             return {
-                "temperature": temperature or 20.0,
+                "temperature": temperature if temperature is not None else 20.0,
                 "condition": (weather or "sunny").lower(),
                 "humidity": 50,
                 "wind_speed": 0.0,
@@ -250,56 +296,225 @@ class RecommendationAgentV2(BaseAgent):
             Filtered items list. Falls back to all items only if filtering is too strict
             AND no extreme weather mismatches were detected.
         """
-        filtered = []
-        extreme_mismatch_count = 0
+        temp = weather_data.get("temperature")
+        temp = 20.0 if temp is None else float(temp)
+        season_key = self._normalize_season(season)
+        weather_filtered = []
+        season_filtered = []
 
         for item in items:
-            # Check season match (only filter if item has explicit season different from "all")
-            if season:
-                item_season = getattr(item, "season", None)
-                if item_season and item_season.lower() != "all":
-                    if season.lower() not in str(item_season).lower():
-                        continue  # Skip items from wrong season
+            material = self._normalize_text(getattr(item, "material", "") or "")
+            if (temp < 5 and "lin" in material) or (temp > 30 and "laine" in material):
+                continue
+            weather_filtered.append(item)
 
-            # Check temperature/material appropriateness
-            temp = weather_data.get("temperature", 20)
-            material = getattr(item, "material", None)
-            if material:
-                material_lower = str(material).lower()
-                # Only filter extreme mismatches
-                if temp < 5 and "lin" in material_lower:
-                    extreme_mismatch_count += 1
-                    continue  # Linen way too cold
-                if temp > 30 and "laine" in material_lower:
-                    extreme_mismatch_count += 1
-                    continue  # Wool way too hot
+            item_seasons = getattr(item, "season", None)
+            normalized_item_seasons = {
+                self._normalize_season(value)
+                for value in re.split(r"[,;/|]", str(item_seasons or ""))
+                if value.strip()
+            }
+            if (
+                not season_key
+                or not normalized_item_seasons
+                or "all" in normalized_item_seasons
+                or season_key in normalized_item_seasons
+            ):
+                season_filtered.append(item)
 
-            filtered.append(item)
+        if season_filtered:
+            return season_filtered
+        if weather_filtered and season_key:
+            logger.info("No wardrobe items match season %s; relaxing season filter", season)
+            return weather_filtered
+        return weather_filtered
 
-        # Only fallback to all items if we filtered out very few items
-        # or if no extreme mismatches were detected
-        if not filtered:
-            if extreme_mismatch_count > 0:
-                # We removed items due to extreme weather, don't fallback completely
-                # Instead, be more lenient: allow some borderline cases
-                filtered = []
-                for item in items:
-                    temp = weather_data.get("temperature", 20)
-                    material = getattr(item, "material", None)
-                    if material:
-                        material_lower = str(material).lower()
-                        # Only skip the most extreme cases
-                        if temp < 0 and "lin" in material_lower:
-                            continue
-                        if temp > 35 and "laine" in material_lower:
-                            continue
-                    filtered.append(item)
-            
-            if not filtered:
-                # Last resort: use all items
-                filtered = items
+    @staticmethod
+    def _normalize_text(value: Any) -> str:
+        normalized = unicodedata.normalize("NFKD", str(value).strip().lower())
+        return "".join(char for char in normalized if not unicodedata.combining(char))
 
-        return filtered
+    @classmethod
+    def _normalize_season(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        normalized = cls._normalize_text(value).replace("-", "_").replace(" ", "_")
+        if not normalized:
+            return None
+        aliases = {
+            "ete": "summer",
+            "summer": "summer",
+            "hiver": "winter",
+            "winter": "winter",
+            "automne": "autumn",
+            "fall": "autumn",
+            "autumn": "autumn",
+            "printemps": "spring",
+            "spring": "spring",
+            "mi_saison": "mid_season",
+            "mid_season": "mid_season",
+            "toutes_saisons": "all",
+            "all_seasons": "all",
+            "all": "all",
+        }
+        return aliases.get(normalized, normalized)
+
+    @staticmethod
+    def _formality_value(value: Any) -> int | None:
+        if isinstance(value, (int, float)):
+            return max(0, min(10, int(value)))
+        normalized = RecommendationAgentV2._normalize_text(value or "")
+        return {
+            "casual": 2,
+            "decontracte": 2,
+            "smart_casual": 5,
+            "formal": 8,
+            "habille": 8,
+        }.get(normalized)
+
+    @classmethod
+    def _canonical_color(cls, value: Any) -> str:
+        color = cls._normalize_text(value)
+        return {
+            "white": "blanc",
+            "black": "noir",
+            "blue": "bleu",
+            "green": "vert",
+            "red": "rouge",
+            "yellow": "jaune",
+            "grey": "gris",
+            "gray": "gris",
+            "pink": "rose",
+            "brown": "marron",
+            "purple": "violet",
+        }.get(color, color)
+
+    @classmethod
+    def _canonical_category(cls, value: Any) -> str:
+        category = cls._normalize_text(value).replace("-", "_").replace(" ", "_")
+        aliases = {
+            "dress": "dress",
+            "robe": "dress",
+            "one_piece": "dress",
+            "jumpsuit": "dress",
+            "combinaison": "dress",
+            "top": "top",
+            "haut": "top",
+            "shirt": "top",
+            "chemise": "top",
+            "blouse": "top",
+            "t_shirt": "top",
+            "tshirt": "top",
+            "tee": "top",
+            "sweater": "top",
+            "pullover": "top",
+            "knitwear": "top",
+            "cardigan": "top",
+            "jacket": "top",
+            "veste": "top",
+            "coat": "top",
+            "outerwear": "top",
+            "bottom": "bottom",
+            "bas": "bottom",
+            "trousers": "bottom",
+            "pants": "bottom",
+            "jean": "bottom",
+            "jeans": "bottom",
+            "pantalon": "bottom",
+            "skirt": "bottom",
+            "jupe": "bottom",
+            "short": "bottom",
+            "shorts": "bottom",
+            "legging": "bottom",
+            "leggings": "bottom",
+            "shoes": "shoes",
+            "shoe": "shoes",
+            "chaussure": "shoes",
+            "chaussures": "shoes",
+            "footwear": "shoes",
+            "sneaker": "shoes",
+            "sneakers": "shoes",
+            "basket": "shoes",
+            "baskets": "shoes",
+            "boot": "shoes",
+            "boots": "shoes",
+            "sandals": "shoes",
+            "sandales": "shoes",
+        }
+        return aliases.get(category, category)
+
+    def _apply_personalization(
+        self, scores: dict[str, float], items: list, context: dict[str, Any]
+    ) -> dict[str, float]:
+        favorite_styles = {
+            self._normalize_text(style)
+            for style in (context.get("favorite_styles") or [])
+            if style
+        }
+        usage = {
+            str(item_id): value
+            for item_id, value in (context.get("usage") or {}).items()
+        }
+        feedback = context.get("feedback_preferences") or []
+        constraints = context.get("constraints") or {}
+        requested_styles = {
+            self._normalize_text(value) for value in (constraints.get("styles") or [])
+        }
+        requested_colors = {
+            self._canonical_color(value) for value in (constraints.get("colors") or [])
+        }
+        feedback_by_item: dict[str, float] = {}
+        for entry in feedback:
+            rating = entry.get("rating")
+            adjustment = 0.08 if rating == "like" else -0.08 if rating == "dislike" else 0.0
+            for item_id in entry.get("item_ids", []):
+                key = str(item_id)
+                feedback_by_item[key] = max(
+                    -0.16, min(0.16, feedback_by_item.get(key, 0.0) + adjustment)
+                )
+
+        adjusted = {}
+        cutoff = date.today() - timedelta(days=7)
+        for item in items:
+            item_id = str(getattr(item, "id", ""))
+            score = scores.get(item_id, self._NEUTRAL_SCORE)
+            style = self._normalize_text(getattr(item, "style", "") or "")
+            if style and style in favorite_styles:
+                score += 0.08
+            if style and style in requested_styles:
+                score += 0.08
+            item_colors = getattr(item, "colors", None) or []
+            if isinstance(item_colors, str):
+                item_colors = [item_colors]
+            if isinstance(item_colors, (list, tuple, set)) and requested_colors:
+                if requested_colors.intersection(
+                    self._canonical_color(color) for color in item_colors
+                ):
+                    score += 0.1
+
+            formality = context.get("formality")
+            if isinstance(formality, (int, float)) and style:
+                formal_style = style in {"formal", "business", "elegant", "habille"}
+                casual_style = style in {"casual", "sport", "sports", "home", "relax"}
+                if formality >= 7:
+                    score += 0.08 if formal_style else -0.06 if casual_style else 0.0
+                elif formality <= 3:
+                    score += 0.06 if casual_style else -0.04 if formal_style else 0.0
+
+            history = usage.get(item_id, {})
+            last_worn = history.get("last_worn") if isinstance(history, dict) else None
+            if isinstance(last_worn, datetime):
+                last_worn = last_worn.date()
+            elif isinstance(last_worn, str):
+                try:
+                    last_worn = date.fromisoformat(last_worn[:10])
+                except ValueError:
+                    last_worn = None
+            if isinstance(last_worn, date) and last_worn >= cutoff:
+                score -= 0.08
+            score += feedback_by_item.get(item_id, 0.0)
+            adjusted[item_id] = float(max(0.0, min(1.0, score)))
+        return adjusted
 
     def _load_models(self, user_id: str) -> dict[str, Any]:
         """Load SFT model and optionally RLHF policy model (FIX-3 fallback chain).
@@ -360,6 +575,9 @@ class RecommendationAgentV2(BaseAgent):
         season: str | None,
         temperature: float | None,
         weather_data: dict[str, Any],
+        *,
+        formality: int | None = None,
+        embeddings: dict[str, Any] | None = None,
     ) -> dict[str, float]:
         """Score items using RLHF policy model or SFT model (FIX-3 fallback chain).
 
@@ -392,10 +610,11 @@ class RecommendationAgentV2(BaseAgent):
         # --- RLHF policy path (FIX-1, FIX-3) ---
         if use_rlhf and policy_model is not None and _TORCH_AVAILABLE:
             try:
-                from app.ml.rlhf_policy_model import RLHFPolicyModel
-
                 item_ids = [str(getattr(item, "id", "")) for item in items]
-                embeddings_dict = vector_store.fetch_embeddings(item_ids)
+                embeddings_dict = (
+                    embeddings if embeddings is not None
+                    else vector_store.fetch_embeddings(item_ids)
+                )
 
                 valid_embeddings: list[np.ndarray] = []
                 for item_id in item_ids:
@@ -430,7 +649,16 @@ class RecommendationAgentV2(BaseAgent):
                 # Fall through to SFT path
 
         # --- SFT path (existing behavior, unchanged) ---
-        return self._score_with_sft(sft_model, items, occasion, season, temperature, weather_data)
+        return self._score_with_sft(
+            sft_model,
+            items,
+            occasion,
+            season,
+            temperature,
+            weather_data,
+            formality=formality,
+            embeddings=embeddings,
+        )
 
     def _score_with_sft(
         self,
@@ -440,6 +668,9 @@ class RecommendationAgentV2(BaseAgent):
         season: str | None,
         temperature: float | None,
         weather_data: dict[str, Any],
+        *,
+        formality: int | None = None,
+        embeddings: dict[str, Any] | None = None,
     ) -> dict[str, float]:
         """Score items using SFT model.
 
@@ -466,18 +697,21 @@ class RecommendationAgentV2(BaseAgent):
         try:
             # Fetch embeddings for items
             item_ids = [str(getattr(item, "id", "")) for item in items]
-            embeddings_dict = vector_store.fetch_embeddings(item_ids)
+            embeddings_dict = (
+                embeddings if embeddings is not None
+                else vector_store.fetch_embeddings(item_ids)
+            )
 
-            embeddings = []
+            embedding_vectors = []
             valid_items = []
             for item in items:
                 item_id = str(getattr(item, "id", ""))
                 emb = embeddings_dict.get(item_id)
                 if emb is not None:
-                    embeddings.append(np.array(emb, dtype=np.float32))
+                    embedding_vectors.append(np.array(emb, dtype=np.float32))
                     valid_items.append(item)
 
-            if not embeddings:
+            if not embedding_vectors:
                 # No embeddings available, return neutral scores
                 for item in items:
                     item_id = str(getattr(item, "id", ""))
@@ -490,12 +724,12 @@ class RecommendationAgentV2(BaseAgent):
             # (batch_size, num_items, _ = shape unpacks 3, not 4).
 
             result = model.predict(
-                embeddings,
+                embedding_vectors,
                 item_ids=[str(getattr(item, "id", "")) for item in valid_items],
                 season=season or "spring",
                 weather=weather_data.get("condition", "sunny"),
                 occasion=occasion or "casual",
-                formality=None,
+                formality=formality,
                 threshold=0.5,
             )
 
@@ -639,8 +873,12 @@ class RecommendationAgentV2(BaseAgent):
         items: list,
         sft_scores: dict[str, float],
         top_k: int = 3,
+        *,
+        season: str | None = None,
+        occasion: str | None = None,
+        compatibility_embeddings: dict[str, Any] | None = None,
     ) -> list[list]:
-        """Compose outfit candidates using greedy selection without duplicates.
+        """Compose and rank complete outfit candidates without duplicate item sets.
 
         Args:
             items: Candidate items
@@ -650,44 +888,189 @@ class RecommendationAgentV2(BaseAgent):
         Returns:
             List of outfits, each outfit is list of items
         """
-        # Group items by category
-        by_category = {}
+        if top_k <= 0:
+            return []
+
+        by_category: dict[str, list] = {}
         for item in items:
-            category = str(getattr(item, "category", "other")).lower()
+            category = self._canonical_category(getattr(item, "category", "other"))
             by_category.setdefault(category, []).append(item)
 
-        # Sort each category by SFT score (descending)
-        for category in by_category:
+        for category in ("dress", "top", "bottom", "shoes"):
+            if category not in by_category:
+                continue
             by_category[category].sort(
                 key=lambda x: sft_scores.get(str(getattr(x, "id", "")), 0.5),
                 reverse=True,
             )
 
-        # Generate top_k outfits without item repetition
+        candidate_limit = min(20, max(10, top_k * 3))
+        dresses = by_category.get("dress", [])[:candidate_limit]
+        tops = by_category.get("top", [])[:candidate_limit]
+        bottoms = by_category.get("bottom", [])[:candidate_limit]
+        shoes = by_category.get("shoes", [])[:candidate_limit] or [None]
+
+        candidates: list[tuple[float, list]] = []
+        for dress, shoe in product(dresses, shoes):
+            outfit = [dress] + ([shoe] if shoe is not None else [])
+            candidates.append((
+                self._outfit_candidate_score(
+                    outfit, sft_scores, season, occasion, compatibility_embeddings
+                ),
+                outfit,
+            ))
+
+        if tops and bottoms:
+            for top, bottom, shoe in product(tops, bottoms, shoes):
+                outfit = [top, bottom] + ([shoe] if shoe is not None else [])
+                candidates.append((
+                    self._outfit_candidate_score(
+                        outfit, sft_scores, season, occasion, compatibility_embeddings
+                    ),
+                    outfit,
+                ))
+
+        candidates.sort(
+            key=lambda candidate: (
+                -candidate[0],
+                tuple(sorted(str(getattr(item, "id", "")) for item in candidate[1])),
+            )
+        )
         outfits = []
-        used_items = set()  # Track items already used
+        seen_item_sets = set()
+        for _, outfit in candidates:
+            item_set = frozenset(str(getattr(item, "id", "")) for item in outfit)
+            if item_set in seen_item_sets:
+                continue
+            seen_item_sets.add(item_set)
+            outfits.append(outfit)
+            if len(outfits) >= max(0, top_k):
+                break
+        return outfits
 
-        for _ in range(top_k):
-            outfit = []
+    def _outfit_candidate_score(
+        self,
+        outfit: list,
+        item_scores: dict[str, float],
+        season: str | None = None,
+        occasion: str | None = None,
+        compatibility_embeddings: dict[str, Any] | None = None,
+    ) -> float:
+        if not outfit:
+            return 0.0
+        item_score = float(np.mean([
+            item_scores.get(str(getattr(item, "id", "")), self._NEUTRAL_SCORE)
+            for item in outfit
+        ]))
+        compatibility = self._score_outfit_compatibility(
+            outfit, season, occasion, compatibility_embeddings=compatibility_embeddings
+        )
+        return item_score + 0.5 * (compatibility - 0.7)
 
-            # Try to pick best available item from each category
-            for category in ["robe", "haut", "bas", "chaussures"]:
-                candidates = by_category.get(category, [])
-                if not candidates:
-                    continue
+    def _score_outfit_compatibility(
+        self,
+        outfit: list,
+        season: str | None = None,
+        occasion: str | None = None,
+        *,
+        compatibility_embeddings: dict[str, Any] | None = None,
+    ) -> float:
+        """Use the trained pair scorer when possible, with a metadata-only fallback."""
+        pair_scores = []
+        neutral_colors = {"black", "white", "grey", "gray", "beige", "noir", "blanc", "gris"}
+        formal_styles = {"formal", "business", "elegant", "habille"}
+        casual_styles = {"casual", "sport", "sports", "home", "relax"}
+        occasion_key = self._normalize_text(occasion or "")
 
-                # Find first unused item in this category
-                for item in candidates:
-                    item_id = str(getattr(item, "id", ""))
-                    if item_id not in used_items:
-                        outfit.append(item)
-                        used_items.add(item_id)
-                        break
+        for index, first in enumerate(outfit):
+            for second in outfit[index + 1:]:
+                first_id = str(getattr(first, "id", ""))
+                second_id = str(getattr(second, "id", ""))
+                first_embedding = (compatibility_embeddings or {}).get(first_id)
+                second_embedding = (compatibility_embeddings or {}).get(second_id)
+                if first_embedding is not None and second_embedding is not None:
+                    season_aliases = {
+                        "summer": "ete",
+                        "winter": "hiver",
+                        "spring": "printemps",
+                        "autumn": "automne",
+                        "mid_season": "mi_saison",
+                    }
+                    normalized_season = self._normalize_season(season)
+                    compatibility_season = (
+                        season_aliases.get(normalized_season, normalized_season)
+                        if normalized_season is not None
+                        else None
+                    )
+                    try:
+                        learned_score = compatibility_model.pair_compatibility(
+                            np.asarray(first_embedding, dtype=np.float32),
+                            np.asarray(second_embedding, dtype=np.float32),
+                            item_a=first,
+                            item_b=second,
+                            season=compatibility_season,
+                            occasion=occasion,
+                        )
+                        if np.isfinite(learned_score):
+                            pair_scores.append(float(max(0.0, min(1.0, learned_score))))
+                            continue
+                    except Exception:
+                        logger.warning(
+                            "Learned compatibility scoring failed for items %s and %s; "
+                            "using metadata compatibility",
+                            first_id,
+                            second_id,
+                            exc_info=True,
+                        )
 
-            if outfit:
-                outfits.append(outfit)
+                score = 0.7
+                first_style = self._normalize_text(getattr(first, "style", "") or "")
+                second_style = self._normalize_text(getattr(second, "style", "") or "")
+                if first_style and second_style:
+                    score += 0.08 if first_style == second_style else -0.05
 
-        return outfits[:top_k]
+                if season:
+                    target_season = self._normalize_season(season)
+                    first_season = self._normalize_season(getattr(first, "season", None))
+                    second_season = self._normalize_season(getattr(second, "season", None))
+                    incompatible = any(
+                        item_season not in (None, "all", target_season)
+                        for item_season in (first_season, second_season)
+                    )
+                    score += -0.05 if incompatible else 0.03
+
+                first_colors = getattr(first, "colors", None) or []
+                second_colors = getattr(second, "colors", None) or []
+                if isinstance(first_colors, str):
+                    first_colors = [first_colors]
+                elif not isinstance(first_colors, (list, tuple, set)):
+                    first_colors = []
+                if isinstance(second_colors, str):
+                    second_colors = [second_colors]
+                elif not isinstance(second_colors, (list, tuple, set)):
+                    second_colors = []
+                first_colors = {self._normalize_text(color) for color in first_colors}
+                second_colors = {self._normalize_text(color) for color in second_colors}
+                if first_colors and second_colors:
+                    if first_colors & second_colors:
+                        score += 0.08
+                    elif first_colors & neutral_colors or second_colors & neutral_colors:
+                        score += 0.04
+
+                if occasion_key and first_style and second_style:
+                    formal_request = any(token in occasion_key for token in ("formal", "business", "elegant", "soiree"))
+                    casual_request = any(token in occasion_key for token in ("casual", "quotidien", "sport"))
+                    if formal_request and (
+                        first_style in casual_styles or second_style in casual_styles
+                    ):
+                        score -= 0.08
+                    elif casual_request and (
+                        first_style in formal_styles or second_style in formal_styles
+                    ):
+                        score -= 0.04
+                pair_scores.append(max(0.0, min(1.0, score)))
+
+        return float(np.mean(pair_scores)) if pair_scores else self._NEUTRAL_SCORE
 
     def _build_outfit_dict(
         self,
@@ -699,6 +1082,9 @@ class RecommendationAgentV2(BaseAgent):
         season: str | None,
         temperature: float | None,
         request_text: str | None,
+        *,
+        outfit_idx: int | None = None,
+        compatibility_score: float | None = None,
     ) -> dict[str, Any]:
         """Build complete outfit dict with all metadata.
 
@@ -718,13 +1104,15 @@ class RecommendationAgentV2(BaseAgent):
         item_ids = [str(getattr(item, "id", "")) for item in outfit_items]
 
         # Compute average SFT score
-        sft_score = np.mean([sft_scores.get(item_id, 0.7) for item_id in item_ids]) if item_ids else 0.7
+        sft_score = (
+            float(np.mean([sft_scores.get(item_id, 0.7) for item_id in item_ids]))
+            if item_ids
+            else 0.7
+        )
 
-        # Get LLM score (llm_scores uses outfit index directly)
-        llm_confidence = None
-        # Need to track outfit index separately; this is passed as parameter below
-        if hasattr(self, '_current_outfit_idx') and self._current_outfit_idx in llm_scores:
-            llm_confidence = llm_scores[self._current_outfit_idx]
+        llm_confidence = llm_scores.get(outfit_idx) if outfit_idx is not None else None
+        if compatibility_score is None:
+            compatibility_score = self._score_outfit_compatibility(outfit_items, season, occasion)
 
         # Generate explanation
         context = {
@@ -757,7 +1145,9 @@ class RecommendationAgentV2(BaseAgent):
         )
 
         # Combine scores
-        combined_score = self._combine_scores(sft_score, llm_confidence)
+        combined_score = self._combine_scores(
+            sft_score, llm_confidence, compatibility_score=compatibility_score
+        )
 
         return {
             "item_ids": item_ids,
@@ -765,6 +1155,7 @@ class RecommendationAgentV2(BaseAgent):
             "scores": {
                 "sft": float(sft_score),
                 "llm": float(llm_confidence) if llm_confidence is not None else None,
+                "compatibility": float(compatibility_score),
                 "combined": float(combined_score),
             },
             "weather_fit": explanation_result.get("weather_verified", False),
@@ -821,32 +1212,31 @@ class RecommendationAgentV2(BaseAgent):
         Returns:
             Outfit dict structure
         """
-        # Group by category
-        by_category = {}
-        for item in wardrobe_items:
-            category = str(getattr(item, "category", "")).lower()
-            by_category.setdefault(category, []).append(item)
-
         outfits = []
-        for _ in range(top_k):
-            outfit = []
-            for category in ["robe", "haut", "bas", "chaussures"]:
-                candidates = by_category.get(category, [])
-                if candidates:
-                    outfit.append(candidates[0])
-
-            if outfit:
-                outfits.append({
-                    "item_ids": [str(getattr(item, "id", "")) for item in outfit],
-                    "explanation": "Tenue par défaut (pipeline indisponible)",
-                    "scores": {"sft": 0.5, "llm": None, "combined": 0.5},
-                    "weather_fit": False,
-                    "confidence": 0.3,
-                    "reasoning": {},
-                    "relevance_score": 0.5,
-                    "critic_score": 0.5,
-                    "dl_score": 0.5,
-                    "react_trace": [],
-                })
+        neutral_scores = {
+            str(getattr(item, "id", "")): self._NEUTRAL_SCORE for item in wardrobe_items
+        }
+        for outfit in self._compose_outfit_candidates(wardrobe_items, neutral_scores, top_k):
+            compatibility = self._score_outfit_compatibility(outfit)
+            combined = self._combine_scores(
+                self._NEUTRAL_SCORE, None, compatibility_score=compatibility
+            )
+            outfits.append({
+                "item_ids": [str(getattr(item, "id", "")) for item in outfit],
+                "explanation": "Tenue par défaut (pipeline indisponible)",
+                "scores": {
+                    "sft": self._NEUTRAL_SCORE,
+                    "llm": None,
+                    "compatibility": compatibility,
+                    "combined": combined,
+                },
+                "weather_fit": False,
+                "confidence": 0.3,
+                "reasoning": {},
+                "relevance_score": combined,
+                "critic_score": combined,
+                "dl_score": self._NEUTRAL_SCORE,
+                "react_trace": [],
+            })
 
         return {"outfits": outfits}

@@ -18,6 +18,7 @@ import {
   clearPurchaseHistory,
   getWishlist,
   addToWishlist,
+import { TTSSpeaker } from "./TTSSpeaker";
   removeFromWishlist,
   ScheduledOutfit,
   StyleProfile,
@@ -1881,6 +1882,7 @@ function OutfitsView({ items, itemsById, outfits, favorites, scheduled, today, b
                 <details className="outfit-explanation">
                   <summary>✦ Conseil éditorial de style</summary>
                   <p>{outfit.explanation}</p>
+                  <TTSSpeaker text={outfit.explanation} />
                 </details>
               )}
 
