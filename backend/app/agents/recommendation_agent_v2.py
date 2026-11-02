@@ -43,10 +43,14 @@ class RecommendationAgentV2(BaseAgent):
 
     name = "recommendation_agent_v2"
 
-    # Weighting for combined score
-    _ALPHA = 0.4  # SFT weight
-    _BETA = 0.3  # LLM weight
-    _GAMMA = 0.3  # Compatibility weight
+    def __init__(self):
+        super().__init__()
+        settings = get_settings()
+        self._ALPHA = settings.recommendation_sft_weight
+        self._BETA = settings.recommendation_llm_weight
+        self._GAMMA = settings.recommendation_compatibility_weight
+        self._NEUTRAL_SCORE = settings.recommendation_neutral_score
+        self._CATEGORIES_ORDER = settings.recommendation_categories_order.split(",")
 
     def run(
         self,
@@ -411,8 +415,8 @@ class RecommendationAgentV2(BaseAgent):
                         raw_score = policy_model.forward(emb_tensor)
                         outfit_score = float(torch.sigmoid(raw_score).squeeze().item())
                 else:
-                    logger.warning("_score_items: no valid embeddings for any item — using neutral 0.7")
-                    outfit_score = 0.7
+                    logger.warning(f"_score_items: no valid embeddings for any item — using neutral {self._NEUTRAL_SCORE}")
+                    outfit_score = self._NEUTRAL_SCORE
 
                 # Assign outfit-level score to all items; items with no embedding also get it
                 for item in items:
@@ -456,7 +460,7 @@ class RecommendationAgentV2(BaseAgent):
             # Fallback: heuristic scoring
             for item in items:
                 item_id = str(getattr(item, "id", ""))
-                scores[item_id] = 0.7  # Neutral score
+                scores[item_id] = self._NEUTRAL_SCORE  # Neutral score
             return scores
 
         try:
@@ -477,14 +481,16 @@ class RecommendationAgentV2(BaseAgent):
                 # No embeddings available, return neutral scores
                 for item in items:
                     item_id = str(getattr(item, "id", ""))
-                    scores[item_id] = 0.7
+                    scores[item_id] = self._NEUTRAL_SCORE
                 return scores
 
-            # Stack embeddings and call model.predict()
-            embeddings_batch = np.stack(embeddings)  # (n_items, 512)
+            # Pass embeddings as a list (not pre-stacked): the SFT model's
+            # predict() wraps non-list args in [...] before np.stack + unsqueeze(0),
+            # so a pre-stacked array would become 4-D and break the model's forward
+            # (batch_size, num_items, _ = shape unpacks 3, not 4).
 
             result = model.predict(
-                embeddings_batch,
+                embeddings,
                 item_ids=[str(getattr(item, "id", "")) for item in valid_items],
                 season=season or "spring",
                 weather=weather_data.get("condition", "sunny"),
@@ -506,7 +512,7 @@ class RecommendationAgentV2(BaseAgent):
             for item in items:
                 item_id = str(getattr(item, "id", ""))
                 if item_id not in scores:
-                    scores[item_id] = 0.7
+                    scores[item_id] = self._NEUTRAL_SCORE
 
             return scores
 
@@ -515,7 +521,7 @@ class RecommendationAgentV2(BaseAgent):
             # Fallback: heuristic scoring
             for item in items:
                 item_id = str(getattr(item, "id", ""))
-                scores[item_id] = 0.7
+                scores[item_id] = self._NEUTRAL_SCORE
             return scores
 
     def _score_with_llm(
@@ -592,7 +598,7 @@ class RecommendationAgentV2(BaseAgent):
                         confidence = self._extract_llm_confidence(result.get("explanation", ""))
                         scores[outfit_idx] = float(confidence)
                     else:
-                        scores[outfit_idx] = 0.7
+                        scores[outfit_idx] = self._NEUTRAL_SCORE
                 except Exception as e:
                     logger.debug(f"LLM validation error for outfit {outfit_idx}: {e}")
                     scores[outfit_idx] = 0.7
@@ -680,18 +686,6 @@ class RecommendationAgentV2(BaseAgent):
 
             if outfit:
                 outfits.append(outfit)
-
-        # If we don't have enough outfits, generate more allowing repetition
-        if len(outfits) < top_k:
-            for _ in range(top_k - len(outfits)):
-                outfit = []
-                for category in ["robe", "haut", "bas", "chaussures"]:
-                    candidates = by_category.get(category, [])
-                    if candidates:
-                        # Just pick the best one
-                        outfit.append(candidates[0])
-                if outfit:
-                    outfits.append(outfit)
 
         return outfits[:top_k]
 
