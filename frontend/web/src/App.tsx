@@ -27,6 +27,10 @@ import {
   parseLowCategoryConfidence,
   LowCategoryConfidence,
   submitOutfitFeedback,
+  getRLHFStats,
+  RLHFStats,
+  submitRLHFFeedback,
+  downloadRLHFExport,
 } from "./api";
 import "./styles.css";
 import LlmAssistant from "./LlmAssistant";
@@ -41,7 +45,8 @@ type Screen =
   | "packing"
   | "purchase"
   | "tryon"
-  | "donation";
+  | "donation"
+  | "rlhf";
 
 const NAV_ITEMS: { id: Screen; label: string; icon: string; group: string }[] = [
   { id: "overview", label: "Accueil", icon: "⌂", group: "TON ESPACE" },
@@ -54,6 +59,7 @@ const NAV_ITEMS: { id: Screen; label: string; icon: string; group: string }[] = 
   { id: "purchase", label: "J’achète ou pas ?", icon: "♡", group: "DÉCOUVRIR" },
   { id: "tryon", label: "Essayage virtuel", icon: "✦", group: "DÉCOUVRIR" },
   { id: "donation", label: "Dons & Seconde vie", icon: "🎁", group: "DÉCOUVRIR" },
+  { id: "rlhf", label: "Suivi RLHF", icon: "◉", group: "DÉCOUVRIR" },
 ];
 
 const SCREEN_COPY: Record<Screen, { title: string; subtitle: string }> = {
@@ -67,6 +73,7 @@ const SCREEN_COPY: Record<Screen, { title: string; subtitle: string }> = {
   purchase: { title: "J’achète ou pas ?", subtitle: "Vérifie si une nouvelle pièce s’accorde à ton dressing." },
   tryon: { title: "Essayage virtuel", subtitle: "Visualise une pièce sur ta photo avant de l’ajouter à ton look." },
   donation: { title: "Dons & Seconde vie", subtitle: "Offre une seconde vie à tes vêtements et découvre où les donner en Tunisie." },
+  rlhf: { title: "Tableau de bord RLHF", subtitle: "Suis les retours et l'évolution des recommandations." },
 };
 
 const OCCASIONS = [
@@ -260,6 +267,8 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [monthAnchor, setMonthAnchor] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const [rlhfStats, setRlhfStats] = useState<RLHFStats | null>(null);
+  const [rlhfDays, setRlhfDays] = useState(30);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -383,6 +392,17 @@ export default function App() {
     });
     return () => { active = false; };
   }, [screen, token]);
+
+  useEffect(() => {
+    if (!token || screen !== "rlhf") return;
+    let active = true;
+    setLoading(true);
+    getRLHFStats(rlhfDays)
+      .then((data) => { if (active) setRlhfStats(data); })
+      .catch((cause: unknown) => { if (active) reportError(cause); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [screen, token, rlhfDays]);
 
   function authenticate(accessToken: string) {
     localStorage.setItem("dressme_access_token", accessToken);
@@ -650,6 +670,19 @@ export default function App() {
     }
   }
 
+  async function saveRLHFRating(outfitId: string, rating: number) {
+    setBusy(`rlhf-rate:${outfitId}`);
+    setError("");
+    try {
+      await submitRLHFFeedback({ outfit_id: outfitId, rating });
+      setNotice("Merci\u00a0! Ton avis améliore les recommandations.");
+    } catch (cause: unknown) {
+      reportError(cause);
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function scheduleOutfit(outfit: Outfit, date: string) {
     if (!date) {
       setError("Choisis une date pour planifier cette tenue.");
@@ -874,7 +907,7 @@ export default function App() {
           </div>
           <div className="topbar-right">
             <span className="weather-chip" title="Météo actuelle en Tunisie">
-              <span className="weather-icon">{topbarWeather.icon}</span> {topbarWeather.city} · {topbarWeather.temp}°C
+              <span className="weather-icon">{topbarWeather.icon}</span> {topbarWeather.temp}°C
             </span>
             <button
               type="button"
@@ -964,7 +997,7 @@ export default function App() {
             />
           )}
           {ingestionReview && <WardrobeIngestionModal review={ingestionReview} busy={busy === "wardrobe-upload"} onConfirm={confirmIngestion} onCancel={() => setIngestionReview(null)} />}
-          {screen === "outfits" && <OutfitsView items={items} itemsById={itemsById} outfits={outfits} favorites={outfitFavorites} scheduled={scheduled} today={today} busy={busy} onGenerate={generateLooks} onToggleFavorite={(id) => toggleFavorite(id, "outfit")} onSchedule={scheduleOutfit} onFeedback={saveOutfitFeedback} />}
+          {screen === "outfits" && <OutfitsView items={items} itemsById={itemsById} outfits={outfits} favorites={outfitFavorites} scheduled={scheduled} today={today} busy={busy} onGenerate={generateLooks} onToggleFavorite={(id) => toggleFavorite(id, "outfit")} onSchedule={scheduleOutfit} onFeedback={saveOutfitFeedback} onRLHFRating={saveRLHFRating} />}
           {screen === "calendar" && <CalendarView anchor={monthAnchor} onMonthChange={setMonthAnchor} scheduled={scheduled} items={items} loading={loading} onSave={saveCalendarOutfit} onRemove={removeCalendarOutfit}  onRender={renderCalendarOutfit} />}
           {screen === "profile" && <ProfileView user={user} profile={profile} busy={busy} onAvatar={uploadAvatar} onNavigate={navigate} />}
           {screen === "assistant" && <LlmAssistant onNavigate={navigate} />}
@@ -999,6 +1032,16 @@ export default function App() {
               onSelectPresetAvatar={selectPresetAvatar}
               onAvatar={uploadAvatar}
               onTryOn={generateTryOn}
+            />
+          )}
+
+          {screen === "rlhf" && (
+            <RLHFDashboard
+              stats={rlhfStats}
+              days={rlhfDays}
+              loading={loading}
+              onSetDays={setRlhfDays}
+              onExport={downloadRLHFExport}
             />
           )}
 
@@ -1631,7 +1674,7 @@ function WardrobeView({ items, favorites, busy, usage, categoryPrompt, onConfirm
   </>;
 }
 
-function OutfitsView({ items, itemsById, outfits, favorites, scheduled, today, busy, onGenerate, onToggleFavorite, onSchedule, onFeedback }: {
+function OutfitsView({ items, itemsById, outfits, favorites, scheduled, today, busy, onGenerate, onToggleFavorite, onSchedule, onFeedback, onRLHFRating }: {
   items: ClothingItem[];
   itemsById: Map<string, ClothingItem>;
   outfits: Outfit[];
@@ -1643,6 +1686,7 @@ function OutfitsView({ items, itemsById, outfits, favorites, scheduled, today, b
   onToggleFavorite: (id: string) => void;
   onSchedule: (outfit: Outfit, date: string) => Promise<void>;
   onFeedback: (outfitId: string, rating: OutfitFeedback | null) => Promise<void>;
+  onRLHFRating: (outfitId: string, rating: number) => Promise<void>;
 }) {
   const [showFavorites, setShowFavorites] = useState(false);
   const [selectedOccasion, setSelectedOccasion] = useState("");
@@ -1858,6 +1902,26 @@ function OutfitsView({ items, itemsById, outfits, favorites, scheduled, today, b
                       onClick={() => void onFeedback(outfit.id, active ? null : rating)}
                     >
                       {isBusy ? "Enregistrement…" : label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* RLHF star rating row */}
+              <div className="rlhf-star-row" aria-label="Note de 1 à 5 étoiles pour améliorer les recommandations">
+                <span className="rlhf-star-label">Améliore l'IA :</span>
+                {[1, 2, 3, 4, 5].map((star) => {
+                  const isRateBusy = busy === `rlhf-rate:${outfit.id}`;
+                  return (
+                    <button
+                      key={star}
+                      type="button"
+                      className="rlhf-star-btn"
+                      aria-label={`${star} étoile${star > 1 ? "s" : ""}`}
+                      disabled={isRateBusy}
+                      onClick={() => void onRLHFRating(outfit.id, star)}
+                    >
+                      ★
                     </button>
                   );
                 })}
@@ -3487,6 +3551,255 @@ function DonationView({
           </div>
         </div>
       </section>
+    </>
+  );
+}
+
+function RLHFDashboard({
+  stats,
+  days,
+  loading,
+  onSetDays,
+  onExport,
+}: {
+  stats: RLHFStats | null;
+  days: number;
+  loading: boolean;
+  onSetDays: (d: number) => void;
+  onExport: (days: number, format: "csv" | "json") => Promise<void>;
+}) {
+  const [exportBusy, setExportBusy] = useState("");
+
+  async function handleExport(format: "csv" | "json") {
+    setExportBusy(format);
+    try {
+      await onExport(days, format);
+    } finally {
+      setExportBusy("");
+    }
+  }
+
+  return (
+    <>
+      <PageHeading
+        title="Tableau de bord RLHF"
+        subtitle="Suis les retours et l'évolution des recommandations."
+      />
+
+      {/* Period selector */}
+      <div className="content-card" style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ fontWeight: 600 }}>Période :</span>
+        {[7, 30, 90].map((d) => (
+          <button
+            key={d}
+            type="button"
+            className={`button${days === d ? " button-primary" : " button-outline"}`}
+            onClick={() => onSetDays(d)}
+          >
+            {d}j
+          </button>
+        ))}
+        <div style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
+          <button
+            type="button"
+            className="button button-outline"
+            disabled={exportBusy === "csv"}
+            onClick={() => void handleExport("csv")}
+          >
+            {exportBusy === "csv" ? "Export…" : "⬇ CSV"}
+          </button>
+          <button
+            type="button"
+            className="button button-outline"
+            disabled={exportBusy === "json"}
+            onClick={() => void handleExport("json")}
+          >
+            {exportBusy === "json" ? "Export…" : "⬇ JSON"}
+          </button>
+        </div>
+      </div>
+
+      {loading && <p className="inline-hint" style={{ padding: "16px" }}>Chargement des statistiques…</p>}
+
+      {!loading && !stats && (
+        <div className="content-card">
+          <p>Aucune donnée disponible. Commence par noter des tenues dans <em>Idées de looks</em>.</p>
+        </div>
+      )}
+
+      {stats && (
+        <>
+          {/* Overview stats cards */}
+          <div className="stats-cards">
+            <div className="summary-card">
+              <span className="summary-icon gold">◉</span>
+              <span className="summary-label">Retours total</span>
+              <strong>{stats.total_feedbacks}</strong>
+              <small>sur {days} derniers jours</small>
+            </div>
+            <div className="summary-card">
+              <span className="summary-icon pink">★</span>
+              <span className="summary-label">Note moyenne</span>
+              <strong>{stats.average_rating.toFixed(1)} / 5</strong>
+              <small>sur tous les retours</small>
+            </div>
+            <div className="summary-card">
+              <span className="summary-icon blue">✦</span>
+              <span className="summary-label">Entraînement IA</span>
+              <strong>
+                {stats.readiness_for_training.has_sufficient_data
+                  ? "✓ Prêt"
+                  : `${stats.readiness_for_training.pair_count} / ${stats.readiness_for_training.next_threshold}`}
+              </strong>
+              <small>
+                {stats.readiness_for_training.last_trained_at
+                  ? `Dernier : ${new Date(stats.readiness_for_training.last_trained_at).toLocaleDateString("fr-FR")}`
+                  : "Jamais entraîné"}
+              </small>
+            </div>
+          </div>
+
+          {/* Rating distribution table */}
+          <section className="content-card">
+            <div className="card-heading">
+              <div>
+                <span className="eyebrow">DISTRIBUTION</span>
+                <h3>Répartition des notes</h3>
+              </div>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+                  <th style={{ padding: "8px" }}>Note</th>
+                  <th style={{ padding: "8px" }}>Nombre</th>
+                  <th style={{ padding: "8px" }}>Proportion</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[5, 4, 3, 2, 1].map((star) => {
+                  const count = stats.rating_distribution[star] ?? 0;
+                  const pct = stats.total_feedbacks > 0 ? Math.round((count / stats.total_feedbacks) * 100) : 0;
+                  return (
+                    <tr key={star} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td style={{ padding: "8px" }}>{"★".repeat(star)}</td>
+                      <td style={{ padding: "8px" }}>{count}</td>
+                      <td style={{ padding: "8px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <div style={{ flex: 1, background: "var(--surface-2, #eee)", borderRadius: "4px", height: "8px" }}>
+                            <div style={{ width: `${pct}%`, background: "var(--accent, #e88)", borderRadius: "4px", height: "8px" }} />
+                          </div>
+                          <span style={{ minWidth: "36px", fontSize: "0.85em" }}>{pct}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </section>
+
+          {/* Avg rating trend */}
+          {stats.avg_rating_trend.length > 0 && (
+            <section className="content-card">
+              <div className="card-heading">
+                <div>
+                  <span className="eyebrow">ÉVOLUTION</span>
+                  <h3>Tendance des notes dans le temps</h3>
+                </div>
+              </div>
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "6px" }}>
+                {stats.avg_rating_trend.map((point) => (
+                  <li key={point.date} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+                    <span>{new Date(`${point.date}T12:00:00`).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</span>
+                    <span>
+                      <strong>{point.avg_rating.toFixed(1)}</strong>
+                      <span style={{ color: "var(--text-muted)", marginLeft: "8px" }}>({point.count} retour{point.count > 1 ? "s" : ""})</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* Most liked / disliked items */}
+          {(stats.most_liked_items.length > 0 || stats.most_disliked_items.length > 0) && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px" }}>
+              {stats.most_liked_items.length > 0 && (
+                <section className="content-card">
+                  <div className="card-heading">
+                    <div>
+                      <span className="eyebrow">POPULAIRES</span>
+                      <h3>Pièces les plus appréciées</h3>
+                    </div>
+                  </div>
+                  <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                    {stats.most_liked_items.map((item) => (
+                      <li key={item.item_id} style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ fontFamily: "monospace", fontSize: "0.8em" }}>{item.item_id.slice(0, 8)}…</span>
+                        <span>👍 {item.count}× · {item.avg_rating.toFixed(1)}★</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+              {stats.most_disliked_items.length > 0 && (
+                <section className="content-card">
+                  <div className="card-heading">
+                    <div>
+                      <span className="eyebrow">À REVOIR</span>
+                      <h3>Pièces les moins appréciées</h3>
+                    </div>
+                  </div>
+                  <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                    {stats.most_disliked_items.map((item) => (
+                      <li key={item.item_id} style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ fontFamily: "monospace", fontSize: "0.8em" }}>{item.item_id.slice(0, 8)}…</span>
+                        <span>👎 {item.count}× · {item.avg_rating.toFixed(1)}★</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+            </div>
+          )}
+
+          {/* Recent feedbacks */}
+          {stats.recent_feedbacks.length > 0 && (
+            <section className="content-card">
+              <div className="card-heading">
+                <div>
+                  <span className="eyebrow">ACTIVITÉ RÉCENTE</span>
+                  <h3>Derniers retours</h3>
+                </div>
+              </div>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+                    <th style={{ padding: "8px" }}>Date</th>
+                    <th style={{ padding: "8px" }}>Tenue</th>
+                    <th style={{ padding: "8px" }}>Note</th>
+                    <th style={{ padding: "8px" }}>Commentaire</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.recent_feedbacks.map((fb) => (
+                    <tr key={fb.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td style={{ padding: "8px", whiteSpace: "nowrap" }}>
+                        {new Date(fb.created_at).toLocaleDateString("fr-FR")}
+                      </td>
+                      <td style={{ padding: "8px", fontFamily: "monospace", fontSize: "0.8em" }}>
+                        {fb.outfit_id.slice(0, 8)}…
+                      </td>
+                      <td style={{ padding: "8px" }}>{"★".repeat(fb.rating)}</td>
+                      <td style={{ padding: "8px", color: "var(--text-muted)" }}>{fb.comment ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
+        </>
+      )}
     </>
   );
 }

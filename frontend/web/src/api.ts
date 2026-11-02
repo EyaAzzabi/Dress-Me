@@ -274,3 +274,86 @@ export async function analyzePhoto(imageUrl: string): Promise<WardrobeAnalysisRe
   const { data } = await api.post<WardrobeAnalysisResponse>("/wardrobe/analyze", { image_url: imageUrl });
   return data;
 }
+
+// ---------------------------------------------------------------------------
+// RLHF — Feedback, stats, and export
+// ---------------------------------------------------------------------------
+
+export interface RLHFFeedbackRequest {
+  outfit_id: string;
+  rating: number; // 1–5
+  comment?: string | null;
+  items_liked?: { id: string; reason?: string }[];
+  items_disliked?: { id: string; reason?: string }[];
+  occasion_matched?: boolean | null;
+  seasonal_appropriate?: boolean | null;
+}
+
+export interface RLHFFeedbackResponse {
+  id: string;
+  user_id: string;
+  outfit_id: string;
+  rating: number;
+  created_at: string;
+  is_new: boolean;
+  total_feedbacks_by_user: number;
+  pairs_available: number;
+}
+
+export interface RLHFStatsDayPoint {
+  date: string;
+  avg_rating: number;
+  count: number;
+}
+
+export interface RLHFStats {
+  total_feedbacks: number;
+  average_rating: number;
+  rating_distribution: Record<number, number>;
+  recent_feedbacks: Array<{
+    id: string;
+    outfit_id: string;
+    rating: number;
+    comment: string | null;
+    items_liked: { id: string; reason?: string }[];
+    items_disliked: { id: string; reason?: string }[];
+    created_at: string;
+  }>;
+  most_liked_items: Array<{ item_id: string; count: number; avg_rating: number }>;
+  most_disliked_items: Array<{ item_id: string; count: number; avg_rating: number }>;
+  avg_rating_trend: RLHFStatsDayPoint[];
+  most_liked_occasions: Record<string, number>;
+  readiness_for_training: {
+    has_sufficient_data: boolean;
+    pair_count: number;
+    next_threshold: number;
+    last_trained_at: string | null;
+  };
+}
+
+export async function submitRLHFFeedback(payload: RLHFFeedbackRequest): Promise<RLHFFeedbackResponse> {
+  const { data } = await api.post<RLHFFeedbackResponse>("/rlhf/feedback", payload);
+  return data;
+}
+
+export async function getRLHFStats(days = 30, limit = 10): Promise<RLHFStats> {
+  const { data } = await api.get<RLHFStats>(`/rlhf/stats?days=${days}&limit=${limit}`);
+  return data;
+}
+
+export async function downloadRLHFExport(days: number, format: "csv" | "json"): Promise<void> {
+  const response = await api.get(`/rlhf/stats?days=${days}&format=${format}`, {
+    responseType: "blob",
+  });
+  const url = window.URL.createObjectURL(new Blob([response.data]));
+  const link = document.createElement("a");
+  link.href = url;
+  link.setAttribute(
+    "download",
+    `retours_rlhf_${new Date().toISOString().slice(0, 10)}.${format}`
+  );
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}

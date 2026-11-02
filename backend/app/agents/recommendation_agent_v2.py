@@ -15,6 +15,7 @@ Gracefully degrades when torch/LLM unavailable.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 import numpy as np
@@ -116,12 +117,12 @@ class RecommendationAgentV2(BaseAgent):
                 # Fallback: use all items if filtering yields nothing
                 filtered_items = wardrobe_items
 
-            # 3. Load SFT model (if available)
-            sft_model = self._load_sft_model(user_id)
+            # 3. Load models (SFT + optional RLHF policy) via FIX-3 fallback chain
+            models = self._load_models(user_id)
 
-            # 4. Score items with SFT
-            sft_scores = self._score_with_sft(
-                sft_model,
+            # 4. Score items (uses RLHF policy → SFT → 0.7 neutral, FIX-3)
+            sft_scores = self._score_items(
+                models,
                 filtered_items,
                 occasion,
                 season,
@@ -296,26 +297,136 @@ class RecommendationAgentV2(BaseAgent):
 
         return filtered
 
-    def _load_sft_model(self, user_id: str) -> Any:
-        """Load SFT model for user.
+    def _load_models(self, user_id: str) -> dict[str, Any]:
+        """Load SFT model and optionally RLHF policy model (FIX-3 fallback chain).
+
+        Fallback chain: RLHF policy → SFT → neutral 0.7.
+        If USE_RLHF_MODEL=true but artifact is missing, logs warning and falls back to SFT.
+        If SFT also fails, callers fall back to neutral 0.7 scores.
 
         Args:
             user_id: User ID (first 8 chars)
 
         Returns:
-            Loaded model or None if unavailable
+            dict with keys: 'sft_model', 'policy_model', 'use_rlhf'
         """
-        if not _TORCH_AVAILABLE:
-            return None
+        sft_model = None
+        policy_model = None
+        use_rlhf = False
 
-        try:
-            from app.ml.outfit_composition_sft_model import load_or_init
+        # Load SFT model
+        if _TORCH_AVAILABLE:
+            try:
+                from app.ml.outfit_composition_sft_model import load_or_init
 
-            model = load_or_init(user_id if user_id else None)
-            return model
-        except Exception as e:
-            logger.warning(f"Could not load SFT model: {e}")
-            return None
+                sft_model = load_or_init(user_id if user_id else None)
+            except Exception as e:
+                logger.warning(f"Could not load SFT model: {e}")
+
+        # Optionally load RLHF policy model (FIX-3)
+        if os.environ.get("USE_RLHF_MODEL", "false").lower() == "true":
+            try:
+                from app.ml import rlhf_policy_model
+
+                loaded = rlhf_policy_model.load_policy_model(user_id)
+                if loaded is not None:
+                    policy_model = loaded
+                    use_rlhf = True
+                else:
+                    logger.warning(
+                        "USE_RLHF_MODEL=true but no checkpoint found, falling back to SFT"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"USE_RLHF_MODEL=true but failed to load policy model: {e}, falling back to SFT"
+                )
+
+        return {"sft_model": sft_model, "policy_model": policy_model, "use_rlhf": use_rlhf}
+
+    # Keep old name as alias for backwards compatibility
+    def _load_sft_model(self, user_id: str) -> Any:
+        """Legacy alias — calls _load_models and returns sft_model for compatibility."""
+        return self._load_models(user_id)["sft_model"]
+
+    def _score_items(
+        self,
+        models: dict[str, Any],
+        items: list,
+        occasion: str | None,
+        season: str | None,
+        temperature: float | None,
+        weather_data: dict[str, Any],
+    ) -> dict[str, float]:
+        """Score items using RLHF policy model or SFT model (FIX-3 fallback chain).
+
+        If models['use_rlhf'] is True and policy_model is available:
+          - Fetch embeddings via vector_store (FIX-1: skip missing, never zero vectors)
+          - Mean-pool per-item embeddings into (512,) outfit-level embedding
+          - Call policy_model.forward(emb_tensor) → scalar score
+          - Assign same score to all items in outfit; missing items get neutral 0.7
+
+        If not use_rlhf: use SFT model path (existing behavior).
+        If neither available: return neutral 0.7 dict.
+
+        Args:
+            models: dict from _load_models()
+            items: Candidate items
+            occasion: Occasion string
+            season: Season string
+            temperature: Temperature
+            weather_data: Weather conditions
+
+        Returns:
+            Dict mapping item id → score (0-1)
+        """
+        scores = {}
+
+        use_rlhf: bool = models.get("use_rlhf", False)
+        policy_model = models.get("policy_model")
+        sft_model = models.get("sft_model")
+
+        # --- RLHF policy path (FIX-1, FIX-3) ---
+        if use_rlhf and policy_model is not None and _TORCH_AVAILABLE:
+            try:
+                from app.ml.rlhf_policy_model import RLHFPolicyModel
+
+                item_ids = [str(getattr(item, "id", "")) for item in items]
+                embeddings_dict = vector_store.fetch_embeddings(item_ids)
+
+                valid_embeddings: list[np.ndarray] = []
+                for item_id in item_ids:
+                    emb = embeddings_dict.get(item_id)
+                    if emb is None:
+                        logger.warning(
+                            f"_score_items: no embedding for item {item_id} — skipping (FIX-1)"
+                        )
+                    else:
+                        valid_embeddings.append(np.array(emb, dtype=np.float32))
+
+                if valid_embeddings:
+                    # Mean-pool valid embeddings → (512,) outfit-level embedding
+                    outfit_embedding = np.mean(np.stack(valid_embeddings), axis=0)  # (512,)
+                    emb_tensor = torch.tensor(outfit_embedding, dtype=torch.float32).unsqueeze(0)  # (1, 512)
+                    with torch.no_grad():
+                        raw_score = policy_model.forward(emb_tensor)
+                        outfit_score = float(torch.sigmoid(raw_score).squeeze().item())
+                else:
+                    logger.warning("_score_items: no valid embeddings for any item — using neutral 0.7")
+                    outfit_score = 0.7
+
+                # Assign outfit-level score to all items; items with no embedding also get it
+                for item in items:
+                    item_id = str(getattr(item, "id", ""))
+                    scores[item_id] = outfit_score
+
+                return scores
+
+            except Exception as e:
+                logger.warning(f"Error scoring with RLHF policy model: {e} — falling back to SFT")
+                # Fall through to SFT path
+
+        # --- SFT path (existing behavior, unchanged) ---
+        return self._score_with_sft(sft_model, items, occasion, season, temperature, weather_data)
 
     def _score_with_sft(
         self,
