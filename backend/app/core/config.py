@@ -49,8 +49,8 @@ class Settings(BaseSettings):
     # Optional stronger model for conversation only; saved narratives keep llm_model.
     llm_chat_model: str | None = None
     llm_chat_fallback_model: str | None = None
-    llm_chat_timeout_seconds: float = Field(default=20.0, gt=0, le=60)
-    llm_timeout_seconds: float = Field(default=8.0, gt=0, le=60)
+    llm_chat_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
+    llm_timeout_seconds: float = Field(default=60.0, gt=0, le=120)
     llm_max_retries: int = Field(default=1, ge=0, le=2)
     llm_backoff_seconds: float = Field(default=0.25, ge=0, le=5)
     llm_max_backoff_seconds: float = Field(default=2.0, ge=0, le=10)
@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     # The test conftest forces both off so existing tests run the fallback path.
     ranking_enabled: bool = True
     contextual_rag_enabled: bool = True
+
+    # Supabase Configuration (optional, for PostgreSQL)
+    supabase_url: str | None = None
+    supabase_public_key: str | None = None
+    supabase_secret_key: str | None = Field(default=None, repr=False)
 
     @property
     def active_llm_api_key(self) -> str | None:
@@ -103,6 +108,24 @@ class Settings(BaseSettings):
     tryon_provider: str = "auto"
     hf_tryon_space: str = "levihsu/OOTDiffusion"
     hf_token: str | None = None
+
+    # Recommendation agent weights and thresholds
+    recommendation_sft_weight: float = 0.4
+    recommendation_llm_weight: float = 0.3
+    recommendation_compatibility_weight: float = 0.3
+    recommendation_neutral_score: float = 0.7
+    recommendation_max_tool_steps: int = 8
+    recommendation_llm_enabled: bool = True
+    recommendation_sft_enabled: bool = True
+    recommendation_categories_order: str = "robe,haut,bas,chaussures"
+    
+    # Weather service configuration
+    weather_cache_ttl: int = 3600
+    weather_request_timeout: float = 5.0
+
+    # TTS (Text-to-Speech) configuration
+    tts_enabled: bool = True
+    tts_language: str = "fr"
 
     class Config:
         env_file = ".env"
