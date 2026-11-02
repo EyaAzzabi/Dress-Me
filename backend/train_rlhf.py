@@ -120,7 +120,7 @@ def _run_pipeline(
     # Step 2: Build preference pairs
     # ------------------------------------------------------------------
     logger.info(f"Building preference pairs for user {user_id}...")
-    pairs, meta = build_preference_pairs(db, user_id)
+    pairs, meta = build_preference_pairs(db, user_id, min_pairs=min_pairs)
     summary["preference_metadata"] = meta
 
     if not meta.get("ready_for_training", False):
