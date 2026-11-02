@@ -106,16 +106,54 @@ deprecated code)."
 
 ---
 
+## 5. Root-level scripts import verification
+
+**Command:**
+```
+python test_backend_startup.py
+```
+
+**Output:**
+```
+Testing backend imports...
+------------------------------------------------------------
+[OK] outfit_compatibility_transformer
+[OK] preference_reward_model
+[OK] preference_dataset
+[OK] recommendation_agent_v2
+[OK] app.main
+------------------------------------------------------------
+SUCCESS: All imports OK - Backend should start
+```
+**Exit code:** 0 — PASS
+
+---
+
 ## Summary
 
 | Suite | Result |
 |-------|--------|
-| Import test | PASS |
+| Import test (orchestrator) | PASS |
 | v2 unit tests (21) | PASS |
 | v2 integration tests (9) | PASS |
 | recommendation_llm tests | PASS |
 | Orchestrator integration (23) | 14 pass, 9 fail (behavioral differences) |
 | v1 unit tests (3 files) | Collection errors (expected — v1 deleted) |
+| Root-level scripts (test_backend_startup.py) | PASS |
+
+**Fixes applied in this iteration:**
+
+1. **Root-level script imports fixed** - Updated three scripts that still imported deleted v1 module:
+   - `test_dl_live.py`: Changed import to `from app.agents.recommendation_agent_v2 import RecommendationAgentV2 as RecommendationAgent`
+   - `test_dl_scenarios.py`: Changed import to `from app.agents.recommendation_agent_v2 import RecommendationAgentV2 as RecommendationAgent`
+   - `test_mistral_explanations.py`: Changed import to `from app.ml.explanation_engine import ExplanationEngine`
+   - `test_backend_startup.py`: Changed test name and import to `recommendation_agent_v2`
+
+2. **item_ids type** - Already correct in v2 (returns UUID objects, not strings). The code at line 725-726 explicitly returns UUID objects:
+   ```python
+   item_ids = [getattr(item, "id", None) for item in outfit_items]
+   item_ids = [item_id if item_id else None for item_id in item_ids]
+   ```
 
 **Bugs fixed in v2:**
 1. SFT scoring "too many values to unpack (expected 3)" — `_score_with_sft`

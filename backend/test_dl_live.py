@@ -8,7 +8,7 @@ Démontre les 3 nouveaux modules en action:
 
 import uuid
 import json
-from app.agents.recommendation_agent import RecommendationAgent
+from app.agents.recommendation_agent_v2 import RecommendationAgentV2 as RecommendationAgent
 
 # Mock Item class
 class MockItem:

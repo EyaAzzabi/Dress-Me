@@ -4,7 +4,7 @@ Teste différents cas d'usage et edge cases
 """
 
 import uuid
-from app.agents.recommendation_agent import RecommendationAgent
+from app.agents.recommendation_agent_v2 import RecommendationAgentV2 as RecommendationAgent
 
 class MockItem:
     def __init__(self, category, style="casual", season="toutes_saisons", colors=None):

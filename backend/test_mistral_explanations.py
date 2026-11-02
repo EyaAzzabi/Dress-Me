@@ -1,6 +1,6 @@
 """Test des explications Mistral une fois configuré"""
 from app.agents.llm_agent import LLMAgent
-from app.agents.recommendation_agent import _build_explanation
+from app.ml.explanation_engine import ExplanationEngine
 from app.models.clothing_item import ClothingItem
 
 print("🤖 Test des explications avec LLM\n")

@@ -12,7 +12,7 @@ tests = [
     ("outfit_compatibility_transformer", "from app.ml import outfit_compatibility_transformer"),
     ("preference_reward_model", "from app.ml import preference_reward_model"),
     ("preference_dataset", "from app.ml import preference_dataset"),
-    ("recommendation_agent", "from app.agents import recommendation_agent"),
+    ("recommendation_agent_v2", "from app.agents.recommendation_agent_v2 import RecommendationAgentV2"),
     ("app.main", "from app.main import app"),
 ]
 
