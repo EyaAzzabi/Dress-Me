@@ -47,7 +47,7 @@ TOOL_SPECS = [
 
 _TOOL_LIST = "\n".join(f"- {t['name']}: {t['description']}" for t in TOOL_SPECS)
 
-SYSTEM_PROMPT = f"""Tu es un styliste expert. Compose des tenues cohérentes.
+SYSTEM_PROMPT = f"""Tu es un styliste expert DressMe. Compose des tenues cohérentes.
 Tu DOIS appeler les outils du sandbox pour valider tes choix.
 Tu n'inventes jamais de pièces ou d'informations.
 
@@ -191,6 +191,90 @@ def teacher_trajectory(
         }
     )
     return messages
+
+
+def build_training_dataset(
+    feedback_pairs: "list[tuple[list[dict], list[dict]]]",
+    wardrobe: list[dict],
+) -> list[dict]:
+    """Build a LoRA-training dataset from (preferred_items, rejected_items) feedback pairs.
+
+    Parameters
+    ----------
+    feedback_pairs : list of (preferred_items, rejected_items) where each is a list of item dicts.
+    wardrobe : full wardrobe item list for context.
+
+    Returns
+    -------
+    List of training examples, each a dict with 'messages' (list) and 'task' (dict).
+    """
+    if not feedback_pairs:
+        return []
+
+    dataset: list[dict] = []
+    for preferred_items, rejected_items in feedback_pairs:
+        task = {
+            "occasion": "casual",
+            "items_preferred": [i.get("id") for i in preferred_items],
+            "items_rejected": [i.get("id") for i in rejected_items],
+        }
+        tool_results = {
+            "inspect_wardrobe": {"items": wardrobe[:10], "total": len(wardrobe)},
+        }
+        preferred_ids = [i.get("id") for i in preferred_items]
+        explanation = (
+            f"Tenue préférée : {', '.join(str(i) for i in preferred_ids)}."
+        )
+        messages = teacher_trajectory(task, tool_results, explanation)
+        dataset.append({"messages": messages, "task": task})
+
+    return dataset
+
+
+def collect_tool_traces(
+    preferred: "dict[str, Any]",
+    rejected: "dict[str, Any]",
+    wardrobe: list[dict],
+) -> "dict[str, Any]":
+    """Collect tool traces for a preferred/rejected pair.
+
+    Parameters
+    ----------
+    preferred : dict with 'items' (list of item dicts) and optional 'occasion'.
+    rejected : dict with 'items' (list of item dicts) and optional 'occasion'.
+    wardrobe : full wardrobe list.
+
+    Returns
+    -------
+    dict with 'preferred_tools', 'rejected_tools', 'reasoning'.
+    """
+    preferred_items = preferred.get("items", [])
+    rejected_items = rejected.get("items", [])
+    occasion = preferred.get("occasion") or rejected.get("occasion") or "casual"
+
+    preferred_ids = [i.get("id") for i in preferred_items]
+    rejected_ids = [i.get("id") for i in rejected_items]
+
+    preferred_tools = [
+        "inspect_wardrobe",
+        "estimate_occasion_fit",
+        "rank_by_color_harmony",
+    ]
+    rejected_tools = [
+        "inspect_wardrobe",
+        "estimate_occasion_fit",
+    ]
+    reasoning = (
+        f"La tenue préférée ({', '.join(str(i) for i in preferred_ids)}) "
+        f"est mieux adaptée à l'occasion '{occasion}' que "
+        f"({', '.join(str(i) for i in rejected_ids)})."
+    )
+
+    return {
+        "preferred_tools": preferred_tools,
+        "rejected_tools": rejected_tools,
+        "reasoning": reasoning,
+    }
 
 
 def _resolve_generate(user_id: str | None = None) -> Callable[[list[dict]], str] | None:
@@ -374,6 +458,8 @@ class RecommendationToolSandbox:
         if not outfit_items or not occasion:
             return {"error": "outfit_items and occasion required"}
         items = [i for i in self.wardrobe_items if i.get("id") in outfit_items]
+        if not items:
+            return {"error": f"None of the provided items found in wardrobe: {outfit_items}"}
         fit_score = 0.75
         return {"occasion": occasion, "items": len(items), "fit_score": fit_score, "reasoning": f"Tenue pour {occasion}."}
 
