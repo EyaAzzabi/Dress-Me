@@ -7,11 +7,10 @@ from sqlalchemy.orm import Session
 from app.agents.llm_agent import LLMAgent
 from app.agents.context_agent import ContextAgent
 from app.agents.extraction_agent import ExtractionAgent
-from app.agents.llm_agent import LLMAgent
 from app.agents.metadata_agent import MetadataAgent
 from app.agents.packing_agent import PackingAgent
 from app.agents.purchase_agent import PurchaseAgent
-from app.agents.recommendation_agent import RecommendationAgent
+from app.agents.recommendation_agent_v2 import RecommendationAgentV2 as RecommendationAgent
 from app.agents.recommendation_evaluation import feedback_alignment_at_k
 from app.agents.style_profile_agent import StyleProfileAgent
 from app.agents.vision_agent import VisionAgent
