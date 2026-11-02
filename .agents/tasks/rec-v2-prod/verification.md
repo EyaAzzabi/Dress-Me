@@ -149,6 +149,54 @@ SUCCESS: All imports OK - Backend should start
    - `test_mistral_explanations.py`: Changed import to `from app.ml.explanation_engine import ExplanationEngine`
    - `test_backend_startup.py`: Changed test name and import to `recommendation_agent_v2`
 
+---
+
+## Personalization Approach: v1 → v2
+
+### What Changed
+
+v1 used hardcoded heuristic signals for personalization:
+- `favorite_styles` → style-match scoring
+- `usage` → freshness penalty (demote recently-worn items)
+- `references` → RAG historical outfits for context fit
+- `ctx_vec` → context vector dot product for ranking
+- `occasion_category`, `formality` → passed to composition/explanation
+- `feedback_preferences` → feedback-aware re-ranking
+
+v2 replaces these heuristics with **per-user SFT/RLHF models**. The personalization
+is learned through the ML pipeline rather than explicit heuristic rules.
+
+### Design Rationale
+
+The 7 dropped signals are absorbed into `**kwargs` for backwards compatibility
+but are not explicitly used in v2's scoring. Instead, v2:
+1. Extracts `user_id` from wardrobe items via `_extract_user_id()`
+2. Loads per-user SFT models via `_load_models(user_id)`
+3. Scores items using the personalized model weights
+
+This approach:
+- Is more flexible than fixed heuristics
+- Improves over time as users generate more feedback
+- Reduces code complexity (no separate ranking logic for each signal)
+
+### Test Updates Required
+
+The 9 failing integration tests in `test_llm_integrations.py` were written for v1's
+heuristic behavior. They should be updated to reflect v2's ML-based approach:
+
+| Test | Update Needed |
+|------|---------------|
+| test_recommendation_keeps_selection_ranking_scores_and_api_schema | Update expected scores for context-dependent SFT |
+| test_feedback_alignment_is_returned_after_personalization | Test now passes user_id to v2 for per-user model loading |
+| test_reused_outfits_refresh_current_context_score_and_explanation | Update expected values for v2's scoring |
+| test_changed_item_attributes_invalidate_outfit_explanation | Update for v2's explanation format |
+| test_absent_context_does_not_generate_weather_or_occasion | v2's ExplanationEngine generates weather text by default |
+| test_incoherent_style_cannot_claim_favorite_style_match | Update for v2's different LLM payload format |
+| test_outfit_deterministic_fallback_replaces_stale_narrative[*] | v2 selects different items with SFT scoring |
+
+These tests validate v1's specific behavior and should be adapted to test v2's
+ML-based personalization approach.
+
 2. **item_ids type** - Already correct in v2 (returns UUID objects, not strings). The code at line 725-726 explicitly returns UUID objects:
    ```python
    item_ids = [getattr(item, "id", None) for item in outfit_items]
