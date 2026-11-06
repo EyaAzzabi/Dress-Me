@@ -248,11 +248,13 @@ def composition_categories(set_id: str) -> set[str]:
 
 def build_rows(items_df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     set_ids = items_df["set_id"].drop_duplicates().tolist()
+    # Precompute once per split (was rebuilt from scratch inside the per-outfit loop
+    # below, i.e. O(len(set_ids)^2) outfit_vecs calls — ~4M for 2000 train outfits).
+    vecs_by_set = {sid: v for sid in set_ids if (v := outfit_vecs(sid)) is not None}
+    pool = np.array([v for vecs in vecs_by_set.values() for v in vecs])
+
     X, y = [], []
-    for set_id in set_ids:
-        vecs = outfit_vecs(set_id)
-        if vecs is None:
-            continue
+    for set_id, vecs in vecs_by_set.items():
         mean_vec = vecs.mean(axis=0)
         visual = visual_coherence(vecs)
         occ = occasion_from_composition(composition_categories(set_id))
@@ -266,10 +268,9 @@ def build_rows(items_df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
         X.append([visual, float(mean_vec @ ctx_vec(other_occ, season, band))])
         y.append(0)
         # negative (ii): random assembly + any context (low visual_coherence)
-        pool = [v for sid in set_ids for v in (outfit_vecs(sid) or [])]
         if len(pool) >= 3:
-            rnd = np.stack(RNG.choice(len(pool), size=min(4, len(pool)), replace=False))
-            rnd_vecs = np.array(pool)[rnd]
+            rnd = RNG.choice(len(pool), size=min(4, len(pool)), replace=False)
+            rnd_vecs = pool[rnd]
             X.append([visual_coherence(rnd_vecs), float(rnd_vecs.mean(axis=0) @ ctx_vec(occ, season, band))])
             y.append(0)
     return np.array(X, dtype=np.float32), np.array(y, dtype=np.int32)
