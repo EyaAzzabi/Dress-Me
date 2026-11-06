@@ -104,11 +104,14 @@ class ConstraintParser:
         self.timeout = timeout
         self.settings = settings
 
-    def parse(self, request_text: str | None) -> dict[str, Any]:
-        """Parse constraints from request_text using LLM with regex fallback.
+    def parse(
+        self, request_text: str | None, *, use_llm: bool = True
+    ) -> dict[str, Any]:
+        """Parse constraints from request_text using LLM and/or regex.
         
         Args:
             request_text: User's request in French (or None/empty).
+            use_llm: Whether to try the configured local LLM before regex fallback.
         
         Returns:
             Dict with keys: colors, styles, occasions, formality, season, notes.
@@ -118,27 +121,27 @@ class ConstraintParser:
         if not request_text or not isinstance(request_text, str) or not request_text.strip():
             return self._empty_constraints()
 
-        try:
-            # Try LLM path first
-            constraints = self._parse_with_llm(request_text)
-            if constraints:
-                _parser_stats["llm_success"] += 1
-                logger.info(
-                    "Constraint extraction: LLM=success, colors=%s, styles=%s, occasion=%s",
-                    constraints.get("colors"),
-                    constraints.get("styles"),
-                    constraints.get("occasions"),
-                )
-                logger.debug("Constraint parsing succeeded (LLM): %s", constraints)
-                return constraints
-        except Exception as exc:
-            logger.debug("Constraint parsing LLM failed: %s", exc)
+        if use_llm:
+            try:
+                constraints = self._parse_with_llm(request_text)
+                if constraints:
+                    _parser_stats["llm_success"] += 1
+                    logger.info(
+                        "Constraint extraction: LLM=success, colors=%s, styles=%s, occasion=%s",
+                        constraints.get("colors"),
+                        constraints.get("styles"),
+                        constraints.get("occasions"),
+                    )
+                    logger.debug("Constraint parsing succeeded (LLM): %s", constraints)
+                    return constraints
+            except Exception as exc:
+                logger.debug("Constraint parsing LLM failed: %s", exc)
 
         # Fallback to regex
         try:
             constraints = self._parse_with_regex(request_text)
             _parser_stats["regex_fallback"] += 1
-            reason = "LLM unavailable or failed"
+            reason = "LLM unavailable or failed" if use_llm else "LLM disabled"
             _add_fallback_event(request_text, reason)
             logger.warning(
                 "Constraint extraction: fallback triggered (reason=%s), colors=%s, styles=%s",

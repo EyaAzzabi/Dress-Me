@@ -1,0 +1,27 @@
+{
+    "id": "FEAT-002",
+    "type": "feat",
+    "description": "Backend API: create backend/app/api/routes/rlhf.py with POST /rlhf/feedback and GET /rlhf/stats endpoints, then register the router. Depends on FEAT-001 (RLHFFeedback model and rlhf schemas).",
+    "status": "completed",
+    "steps": [
+        "Create backend/app/api/routes/rlhf.py: define router = APIRouter(prefix='/rlhf', tags=['rlhf']). Import RLHFFeedback from app.models.rlhf_feedback, Outfit from app.models.outfit, get_current_user from app.api.deps, get_db from app.db.session, RLHFFeedbackRequest / RLHFFeedbackResponse / RLHFStats / RLHFStatsDayPoint from app.schemas.rlhf.",
+        "Implement POST /rlhf/feedback endpoint: auth=get_current_user, db=get_db. (1) Fetch outfit by outfit_id — 404 if missing. (2) Check outfit.owner_id == current_user.id — 403 if not. (3) Validate items_liked/items_disliked UUIDs are subsets of outfit.item_ids — 422 if not. (4) INSERT new RLHFFeedback row always (FIX-5: never upsert, always new row). (5) Compute total_feedbacks_by_user via SELECT COUNT(*). (6) Compute pairs_available: count distinct outfit_ids with feedback for user, then n*(n-1)//2. (7) Return RLHFFeedbackResponse with is_new=True, status 201.",
+        "Implement GET /rlhf/stats endpoint: auth=get_current_user, db=get_db. Query params: days:int=30 (validate 1-365), limit:int=10 (validate 1-50), format:str='json'. Scoped to current_user.id. Compute: total_feedbacks (COUNT), average_rating (AVG, default 0.0 if no data), rating_distribution ({1:0,2:0,3:0,4:0,5:0} filled from query), recent_feedbacks (last `limit` rows sorted by created_at DESC, return as list of dicts with all fields), most_liked_items (aggregate items_liked JSON arrays: parse each row's items_liked, count item_id occurrences, join avg rating when that item was liked — top `limit` by count), most_disliked_items (same for items_disliked), avg_rating_trend (GROUP by date string 'YYYY-MM-DD', AVG(rating), COUNT, sorted ASC, last `days` days), most_liked_occasions (join outfit.occasion, AVG(rating) per occasion), readiness_for_training (has_sufficient_data=pairs_available>=100, pair_count=pairs_available, next_threshold=100, last_trained_at=mtime of artifacts/reward_model_{user_id[:8]}.pt as ISO8601 or null). For format='csv': build CSV string with headers and return Response(content=csv_bytes, media_type='text/csv', headers={'Content-Disposition':'attachment; filename=retours_rlhf.csv'}).",
+        "Edit backend/app/api/routes/__init__.py: add 'from app.api.routes import rlhf' to the imports and 'api_router.include_router(rlhf.router)' after the existing include_router calls."
+    ],
+    "acceptance_criteria": [
+        "Running 'python -c \"from app.api.routes.rlhf import router; print(router.prefix)\"' from backend/ prints '/rlhf'.",
+        "Running 'python -c \"from app.main import app; print([r.path for r in app.routes if \\\"rlhf\\\" in r.path])\"' from backend/ shows /api/v1/rlhf/feedback and /api/v1/rlhf/stats.",
+        "POST /rlhf/feedback returns 403 when outfit belongs to another user.",
+        "POST /rlhf/feedback returns 404 when outfit_id does not exist.",
+        "POST /rlhf/feedback returns 422 when rating is 0 or 6.",
+        "GET /rlhf/stats returns JSON with all required keys when no data exists (zeros/empty lists).",
+        "GET /rlhf/stats?format=csv returns Content-Type: text/csv."
+    ],
+    "verification": [
+        "cd backend && python -c \"from app.api.routes.rlhf import router; from app.main import app; print('FEAT-002 router OK')\"",
+        "cd backend && python -m pytest tests/ -k rlhf -v 2>&1 | tail -20"
+    ],
+    "blocked_reason": null,
+    "findings": "POST /rlhf/feedback always INSERTs a new row (FIX-5 compliant) — is_new is always True. GET /rlhf/stats returns all-zero/empty-list response when table is empty; rating_distribution always contains all 5 keys {1:0,2:0,3:0,4:0,5:0}. items_liked/items_disliked parsed with _parse_json_field() (handles both list and JSON string). last_trained_at uses pathlib.Path.stat().st_mtime on artifacts/reward_model_{user_id[:8]}.pt; returns null if file missing. CSV export built with Python's csv module, returned as FastAPI Response(content=..., media_type='text/csv'). Router registered in __init__.py. 14/14 tests pass."
+}

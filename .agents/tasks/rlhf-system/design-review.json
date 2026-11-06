@@ -1,0 +1,86 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "severity": "HIGH",
+      "issue": "Vector Store Integration Not Verified — The design assumes vector_store.fetch_embeddings([item.embedding_id]) exists and returns (512,) numpy arrays, but this is never verified in the codebase. The module is imported in recommendation_agent.py but the actual API is unknown.",
+      "location": "Step 2: Generate Outfit Embeddings (train_rlhf.py → get_outfit_embeddings())"
+    },
+    {
+      "severity": "HIGH",
+      "issue": "PPO Policy Gradient Loss Underspecified — The policy loss formula is inconsistent with PPO semantics: it uses raw advantage (no baseline), has no clipping, and doesn't align with proper RL formulation. The code is labeled 'PPO' but implements simple policy gradient.",
+      "location": "Step 4: Fine-tune SFT Model via PPO (train_rlhf.py)"
+    },
+    {
+      "severity": "HIGH",
+      "issue": "RLHF Model Integration Point Undefined — The design shows code snippets but does not specify WHERE in the recommendation flow the RLHF model is loaded and used, when it's called, or what fallback chain is used if it's unavailable.",
+      "location": "Integration Design → recommendation_agent.py modification"
+    },
+    {
+      "severity": "HIGH",
+      "issue": "Training Data Collection Incomplete — The design assumes all items in an outfit have embeddings, but handles missing embeddings by silently using all-zero vectors. This poisons the reward model training without obvious error messages.",
+      "location": "Step 1: Load Feedback & Build Preference Pairs; Step 2: get_outfit_embeddings()"
+    },
+    {
+      "severity": "HIGH",
+      "issue": "Schema Uniqueness Constraint Conflicts with Update Semantics — The UNIQUE(user_id, outfit_id) constraint allows only one rating per outfit, but the design says 'UPDATE semantics if re-rated'. Re-rating overwrites the old feedback, losing the original preference signal and breaking the training data collection.",
+      "location": "Data Model → rlhf_feedback table schema"
+    },
+    {
+      "severity": "MEDIUM",
+      "issue": "Preference Pair Weighting Formula Ambiguous — The weight formula (rating_a - rating_b) / 4.0 produces negative weights if rating_a < rating_b, contradicting the documented range [0, 1]. The design doesn't specify what happens to negative weights.",
+      "location": "Preference Pair Derivation (preference_dataset.py)"
+    },
+    {
+      "severity": "MEDIUM",
+      "issue": "Ambiguity: How Are Outfit IDs Looked Up in Training? — If an outfit is deleted between feedback submission and training, get_outfit_embeddings() silently falls back to all-zeros, poisoning the pair without error. No validation that outfit exists or has valid embeddings.",
+      "location": "Step 4: Fine-tune SFT Model via PPO (outfit embedding retrieval)"
+    },
+    {
+      "severity": "MEDIUM",
+      "issue": "SFT Model Output Tensor Shape Mismatch — The SFT model's forward() expects (batch, num_items, 512) and (batch, 128) context, but the PPO training loop calls it with (1, 512) only. This will fail with tensor shape error. The model was designed for multi-item selection, not outfit-level scoring.",
+      "location": "Step 4: Fine-tune SFT Model via PPO (PPO loop → sft_model(pref_emb.unsqueeze(0)))"
+    },
+    {
+      "severity": "MEDIUM",
+      "issue": "Training Gate: 100 Pairs May Not Be Sufficient — No discussion of overfitting risk, train/val split, or early stopping. 100 pairs is low for training an MLP with 512-d input and 3 hidden layers. No validation dataset mentioned for Bradley-Terry training.",
+      "location": "FR-7: Gate retraining on data sufficiency"
+    },
+    {
+      "severity": "MEDIUM",
+      "issue": "No Feedback Deduplication or Outlier Handling — The design doesn't address spam (1000 identical outfits rated), outliers (single user with extreme preferences), or cold-start (only one user with feedback). RLHF model may learn spurious patterns.",
+      "location": "Step 1: Load Feedback & Build Preference Pairs"
+    },
+    {
+      "severity": "MEDIUM",
+      "issue": "Frontend Export Format Ambiguous — The design says 'CSV/JSON export' but doesn't specify headers, structure, or how nested fields (items_liked array) are serialized. Implementation will have to guess.",
+      "location": "Endpoint: GET /api/v1/rlhf/stats (Export Controls) and ExportControls component"
+    },
+    {
+      "severity": "MEDIUM",
+      "issue": "No Graceful Degradation for Backward Compatibility — The design states fallback exists but doesn't specify what happens if RLHF model is corrupt, missing, or PyTorch is unavailable. Error handling chain is undefined.",
+      "location": "Backward Compatibility section and Error Handling section"
+    },
+    {
+      "severity": "MEDIUM",
+      "issue": "Insufficient Testing Strategy — Test categories are listed but lack specifics: mocking strategy, synthetic data details, fixture setup, and performance benchmark validation are not defined. Tests may be flaky or incomplete.",
+      "location": "Testing Strategy section"
+    },
+    {
+      "severity": "NIT",
+      "issue": "French/English Inconsistency — Dashboard labels are in French (UX), but API endpoints are in English. No decision on convention.",
+      "location": "Frontend Design and API routes"
+    },
+    {
+      "severity": "NIT",
+      "issue": "Missing Cache Invalidation for Stats Dashboard — Frontend fetches stats on mount, but new feedback doesn't trigger stats refresh. Minor UX issue.",
+      "location": "Frontend Design → RLHFDashboard component"
+    },
+    {
+      "severity": "NIT",
+      "issue": "Outfit Metadata Not Used in Reward Model — Schema captures occasion_matched and seasonal_appropriate, but reward model ignores them. Design doesn't explain why; should note as future enhancement.",
+      "location": "Data Model → rlhf_feedback table (occasion_matched, seasonal_appropriate); Step 3: Train Bradley-Terry Reward Model"
+    }
+  ],
+  "reviewDoc": "e:/Téléchargements/Dress-Me-main/.agents/tasks/rlhf-system/design-review.md"
+}

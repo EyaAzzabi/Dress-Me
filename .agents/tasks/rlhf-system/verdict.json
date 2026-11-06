@@ -1,0 +1,9 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    "--min-pairs not forwarded to build_preference_pairs: train_rlhf.py line 123 calls build_preference_pairs(db, user_id) without min_pairs=min_pairs, so the ready_for_training gate always uses the hardcoded default of 100 instead of the user-supplied CLI value. Fix: pass min_pairs=min_pairs to build_preference_pairs.",
+    "Duplicate rlhf entry in NAV_ITEMS: App.tsx line 62 has two identical { id: 'rlhf', label: 'Suivi RLHF', icon: '◉', group: 'DÉCOUVRIR' } entries, rendering two identical sidebar nav items. Fix: remove the duplicate entry."
+  ],
+  "summary": "All 5 critical constraints verified: FIX-1 (no zero vectors), FIX-2 (PPO clipping with entropy bonus), FIX-3 (RLHF→SFT→0.7 fallback chain), FIX-4 (<70% coverage outfits excluded), FIX-5 (no UNIQUE constraint, always INSERT). Frontend build passes with no TypeScript errors, no recharts added. Two non-blocking issues found: --min-pairs CLI arg not propagated to build_preference_pairs first gate, and a duplicate rlhf NAV_ITEMS entry in App.tsx.",
+  "reviewDoc": ".agents/tasks/rlhf-system/2026-11-02-093429-review.md"
+}

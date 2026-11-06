@@ -6,11 +6,10 @@ from sqlalchemy.orm import Session
 
 from app.agents.context_agent import ContextAgent
 from app.agents.extraction_agent import ExtractionAgent
-from app.agents.llm_agent import LLMAgent
 from app.agents.metadata_agent import MetadataAgent
 from app.agents.packing_agent import PackingAgent
 from app.agents.purchase_agent import PurchaseAgent
-from app.agents.recommendation_agent import RecommendationAgent
+from app.agents.recommendation_agent_v2 import RecommendationAgentV2 as RecommendationAgent
 from app.agents.recommendation_evaluation import feedback_alignment_at_k
 from app.agents.style_profile_agent import StyleProfileAgent
 from app.agents.vision_agent import VisionAgent
@@ -114,14 +113,9 @@ class AgentOrchestrator:
                 # second LLM call per outfit and feed LLM text back in as the "deterministic" fact.
             )
 
-        # Prefer pieces wearable in the context's season; if that leaves nothing to build
-        # an outfit from (e.g. only summer pieces in winter), fall back to the whole
-        # wardrobe rather than returning nothing.
-        generated = generate(
-            self.metadata_agent.run(user_id=user_id, wearable_in=context["season"])["items"]
-        )
-        if not generated["outfits"] and context["season"]:
-            generated = generate(self.metadata_agent.run(user_id=user_id)["items"])
+        # DEBUG: Skip season filtering for now to ensure we have enough items
+        # (Many wardrobes have items marked as 'hiver' that should be wearable year-round)
+        generated = generate(self.metadata_agent.run(user_id=user_id)["items"])
 
         # Load existing saved outfits keyed by item-set so we can reuse the same DB
         # row (and hence the same Outfit.id) when the same items are recommended again.

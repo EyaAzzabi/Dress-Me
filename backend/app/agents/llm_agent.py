@@ -91,7 +91,9 @@ class LLMAgent(BaseAgent):
             return None
         try:
             content = self._chat(
-                occasion_parse_prompt(raw_occasion, context_hints), json_mode=True
+                occasion_parse_prompt(raw_occasion, context_hints), 
+                json_mode=True,
+                timeout=float(self.settings.llm_timeout_seconds)
             )
             parsed = json.loads(content)
         except Exception:
@@ -137,7 +139,10 @@ class LLMAgent(BaseAgent):
         if self.settings.llm_provider == "none":
             return None
         try:
-            return self._chat(explain_outfit_prompt(facts))
+            return self._chat(
+                explain_outfit_prompt(facts),
+                timeout=float(self.settings.llm_timeout_seconds)
+            )
         except Exception:
             logger.warning(
                 "LLMAgent.explain_outfit: LLM failure, falling back to template",

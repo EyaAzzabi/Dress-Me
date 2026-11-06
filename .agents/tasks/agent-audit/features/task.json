@@ -1,0 +1,7 @@
+{
+  "task_id": "task-agent-audit",
+  "task_description": "Clean, refactor, and improve the DressMe recommendation agent system for maximum flexibility and bug-free operation",
+  "status": "pending",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+  "blocked_reason": null
+}

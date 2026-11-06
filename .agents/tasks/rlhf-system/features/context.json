@@ -1,0 +1,33 @@
+{
+  "project_type": "FastAPI backend (Python) + Vite/React/TypeScript frontend (web), single-user monorepo",
+  "language": "Python 3.11+ (backend), TypeScript/TSX (frontend)",
+  "build_system": "backend: uvicorn + alembic migrations (manual, not autogenerate); frontend: Vite + tsc (npm run build). No monorepo runner — each runs independently.",
+  "test_framework": "backend: pytest (pytest>=8.3 in requirements.txt). No frontend test framework configured.",
+  "build_command": "frontend: cd frontend/web && npm run build   |   backend: no separate compile step; python -c 'from app.main import app' validates imports",
+  "test_command": "cd backend && python -m pytest tests/ -v",
+  "verification_instructions": "1) Backend import check: cd backend && python -c 'from app.main import app; print(\"OK\")'. 2) Frontend build: cd frontend/web && npm run build (must exit 0 with no TS errors). 3) Run pytest: cd backend && python -m pytest tests/ -v (new tests must pass). 4) For ML modules: python -c 'from app.ml.<module> import <symbol>; print(\"OK\")'.",
+  "snapshot_or_generated_files": "backend/app/ml/artifacts/*.pt (PyTorch checkpoints) — NOT committed. Alembic migration files in backend/alembic/versions/ ARE committed and must be written manually.",
+  "environment_constraints": "Windows dev machine (PowerShell). Do NOT run alembic upgrade head (DB may not be reachable). Write migration files manually. recharts is NOT installed — use plain HTML for charts. No concurrent worktree processes.",
+  "contribution_requirements": "Follow existing SQLAlchemy patterns (Mapped, mapped_column, TypeDecorator for JSON). Follow existing Pydantic v2 patterns (BaseModel, Field). Migration files: manually written, following ab73d9e1c540_add_recommendation_feedback.py exactly. All ML files: optional torch import with _TORCH_AVAILABLE guard.",
+  "key_patterns": "1) SQLAlchemy models: use Mapped[T] = mapped_column(...) syntax, Base from app.db.base, UUID as Uuid(as_uuid=True). 2) JSON columns: TypeDecorator with impl=Text, cache_ok=True — see JSONUUIDList in outfit.py. 3) Routes: APIRouter with prefix and tags, auth via Depends(get_current_user), db via Depends(get_db). 4) Schemas: Pydantic BaseModel with class Config: from_attributes=True for ORM reads. 5) ML modules: try/except torch import at top, _TORCH_AVAILABLE flag, graceful stubs. 6) Alembic: op.create_table / op.drop_table in upgrade/downgrade, sa.Column with exact types.",
+  "relevant_files": [
+    "backend/app/models/outfit.py",
+    "backend/app/models/recommendation_feedback.py",
+    "backend/app/models/__init__.py",
+    "backend/app/schemas/outfit.py",
+    "backend/app/api/routes/__init__.py",
+    "backend/app/api/routes/recommendations.py",
+    "backend/app/main.py",
+    "backend/app/db/vector_store.py",
+    "backend/app/db/base.py",
+    "backend/app/ml/outfit_composition_sft_model.py",
+    "backend/app/ml/preference_reward_model.py",
+    "backend/app/ml/preference_dataset.py",
+    "backend/app/agents/recommendation_agent_v2.py",
+    "backend/alembic/versions/ab73d9e1c540_add_recommendation_feedback.py",
+    "frontend/web/src/api.ts",
+    "frontend/web/src/App.tsx",
+    "frontend/web/package.json"
+  ],
+  "directory_structure": "backend/app/models/ — SQLAlchemy ORM models; backend/app/schemas/ — Pydantic request/response schemas; backend/app/api/routes/ — FastAPI routers (registered in __init__.py then included in main.py via api_router); backend/app/ml/ — ML models and training utilities; backend/app/ml/artifacts/ — PyTorch checkpoint files (.pt); backend/app/agents/ — agent orchestration; backend/alembic/versions/ — migration files; frontend/web/src/ — React app (App.tsx is monolithic, api.ts is the API client)."
+}

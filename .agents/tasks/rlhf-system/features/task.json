@@ -1,0 +1,7 @@
+{
+    "task_id": "task-rlhf-system",
+    "task_description": "Implement end-to-end RLHF system for DressMe outfit recommendations: DB migration, feedback API, PPO policy training pipeline, model integration in recommendation agent, and RLHF dashboard in the frontend.",
+    "status": "completed",
+    "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+    "blocked_reason": null
+}

@@ -55,3 +55,4 @@ Thumbs.db
 *.sqlite
 uploads/
 backend/uploads/
+polyvore_data/

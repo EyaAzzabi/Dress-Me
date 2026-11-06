@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Integrate TTS speaker button into the Outfits screen (App.tsx outfits section) so users can hear outfit explanations read aloud. Each outfit card gets a TTSSpeaker component that reads the outfit's explanation text when clicked.",
+  "status": "pending",
+  "steps": [
+    "1. Import TTSSpeaker component at the top of e:\\Téléchargements\\Dress-Me-main\\frontend\\web\\src\\App.tsx: import TTSSpeaker from './TTSSpeaker'",
+    "2. Locate the outfits rendering section in App.tsx (search for screen === 'outfits' and the outfit cards map). Each outfit card currently shows occasion, item images, explanation, and feedback buttons.",
+    "3. Add TTSSpeaker component inside each outfit card after the explanation text and before the feedback buttons. Pass outfitId={outfit.id} prop. Wrap in a div with className='outfit-tts-control' for styling hook.",
+    "4. Add CSS for .outfit-tts-control in e:\\Téléchargements\\Dress-Me-main\\frontend\\web\\src\\styles.css: margin-top: 0.5rem, display: flex, justify-content: flex-start. Style .outfit-tts-control button to match existing .button styles but smaller (font-size: 0.9rem, padding: 0.4rem 0.8rem).",
+    "5. Test responsive layout: ensure speaker button doesn't break outfit card layout on narrow screens (existing .outfit-card is already responsive)."
+  ],
+  "acceptance_criteria": [
+    "TTSSpeaker imported in App.tsx",
+    "TTSSpeaker component rendered in each outfit card in the outfits screen with outfitId prop",
+    "CSS styling added for .outfit-tts-control in styles.css",
+    "TypeScript compilation succeeds",
+    "Speaker button appears on outfit cards and reads explanation when clicked (manual verification)"
+  ],
+  "verification": [
+    "Run: cd e:\\Téléchargements\\Dress-Me-main\\frontend\\web && npx tsc --noEmit (no type errors)",
+    "Start backend: cd e:\\Téléchargements\\Dress-Me-main\\backend && uvicorn app.main:app --reload --port 8000",
+    "Start frontend: cd e:\\Téléchargements\\Dress-Me-main\\frontend\\web && npm run dev",
+    "Manual test: Open http://localhost:5173, log in, navigate to Idées de looks screen, generate outfits (if none exist), verify speaker icon appears on each outfit card, click speaker icon and confirm audio plays (French TTS reading the explanation), verify loading state shows during fetch, verify pause/stop works, verify error handling if backend is stopped mid-playback",
+    "Visual check: speaker button styling matches app design, doesn't break card layout on mobile viewport (resize browser to 375px width)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

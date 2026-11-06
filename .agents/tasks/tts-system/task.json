@@ -1,0 +1,7 @@
+{
+  "task_id": "task-tts-system",
+  "task_description": "Add a Text-to-Speech (TTS) system to the DressMe fashion recommendation app so users can hear outfit recommendations and explanations read aloud in French",
+  "status": "pending",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "blocked_reason": null
+}
